@@ -1,0 +1,15 @@
+{
+  "name": "prusa-timelapse",
+  "version": "0.1.0",
+  "description": "",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "capture": "node capture-timelapse.mjs",
+    "make": "node make-timelapse.mjs",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "Johan Nordström <johan@digitalvillage.se>",
+  "license": "ISC"
+}
