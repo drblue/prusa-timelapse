@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
+import kleur from "kleur";
 
 const SPEED_OPTIONS = [0.5, 1, 1.5, 2, 3, 5, 10];
 
@@ -77,6 +78,41 @@ const countFrames = (dir, prefix = "frame_", ext = ".jpg") => {
 	} catch {
 		return 0;
 	}
+};
+
+const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const findStartNumber = (dir, prefix, ext) => {
+	let entries;
+	try {
+		entries = fs.readdirSync(dir);
+	} catch {
+		return null;
+	}
+	const re = new RegExp(`^${escapeRegex(prefix)}(\\d+)${escapeRegex(ext)}$`);
+	let min = null;
+	for (const name of entries) {
+		const match = re.exec(name);
+		if (!match) continue;
+		const n = Number(match[1]);
+		if (!Number.isInteger(n)) continue;
+		if (min === null || n < min) min = n;
+	}
+	return min;
+};
+
+const parseFolderStamp = (name) => {
+	const match = /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})$/.exec(name);
+	if (!match) return null;
+	const [, yyyy, mm, dd, hh, mi, ss] = match;
+	const iso = `${yyyy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
+	const date = new Date(iso);
+	if (Number.isNaN(date.getTime())) return null;
+	return {
+		dateKey: `${yyyy}-${mm}-${dd}`,
+		timeOnly: `${hh}:${mi}:${ss}`,
+		timestamp: date.getTime(),
+	};
 };
 
 const formatDuration = (seconds) => {
@@ -176,21 +212,40 @@ const run = async () => {
 			const prefix = meta.prefix ?? "frame_";
 			const ext = `.${meta.ext ?? "jpg"}`;
 			const intervalSeconds = Number(meta.intervalSeconds) || 5;
+			const baseName = path.basename(dir);
+			const parsed = parseFolderStamp(baseName);
 			return {
 				dir,
 				prefix,
 				ext,
 				intervalSeconds,
 				frames: countFrames(dir, prefix, ext),
+				baseName,
+				displayName: parsed?.timeOnly ?? baseName,
+				dateKey: parsed?.dateKey ?? "Other",
+				timestamp: parsed?.timestamp ?? null,
 			};
 		})
-		.sort((a, b) => path.basename(b.dir).localeCompare(path.basename(a.dir)));
+		.sort((a, b) => {
+			const aKnown = a.timestamp !== null;
+			const bKnown = b.timestamp !== null;
+			if (aKnown && bKnown) return a.timestamp - b.timestamp;
+			if (aKnown !== bKnown) return aKnown ? -1 : 1;
+			return a.baseName.localeCompare(b.baseName);
+		});
 
-	console.log("\nFound prints:\n");
+	console.log(`\n${kleur.bold().cyan("📸 Found prints")}\n`);
+	let currentDateKey = null;
 	items.forEach((it, i) => {
+		if (it.dateKey !== currentDateKey) {
+			currentDateKey = it.dateKey;
+			if (i !== 0) console.log("");
+			console.log(kleur.bold().yellow(`📅 ${currentDateKey}`));
+		}
+		const nameColor = it.timestamp ? kleur.white : kleur.gray;
 		console.log(
-			`${String(i + 1).padStart(2)}. ${path.basename(it.dir)} ` +
-			`(${it.frames} frames, ${it.intervalSeconds}s interval)`
+			`${kleur.magenta(String(i + 1).padStart(2) + ".")} ${nameColor(`🕒 ${it.displayName}`)} ` +
+			`${kleur.dim(`(${it.frames} frames, ${it.intervalSeconds}s interval)`)}`
 		);
 	});
 
@@ -215,6 +270,7 @@ const run = async () => {
 	});
 
 	const outFps = speed >= 2 ? 60 : baseFps;
+	const startNumber = findStartNumber(chosen.dir, chosen.prefix, chosen.ext);
 
 	const baseName = `timelapse-${path.basename(chosen.dir)}-${outFps}fps-${crf}crf-${speed}x.mp4`;
 	const desiredPath = opts.outFile ?? path.join(opts.baseDir, baseName);
@@ -227,6 +283,7 @@ const run = async () => {
 		"-hide_banner",
 		"-loglevel", "error",
 		"-y",
+		...(Number.isInteger(startNumber) ? ["-start_number", String(startNumber)] : []),
 		"-framerate", String(outFps),
 		"-i", input,
 		"-vf", vf,
@@ -236,13 +293,13 @@ const run = async () => {
 		outFile,
 	];
 
-	console.log("\nRunning:");
-	console.log("ffmpeg " + ffmpegArgs.join(" "));
+	console.log(`\n${kleur.bold().cyan("🎬 Running")}:`);
+	console.log(kleur.dim("ffmpeg " + ffmpegArgs.join(" ")));
 
 	const p = spawn("ffmpeg", ffmpegArgs, { stdio: "inherit" });
 	await new Promise((res, rej) => p.on("exit", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg exited ${c}`)))));
 
-	console.log(`\n✅ Wrote: ${outFile}`);
+	console.log(`\n${kleur.green("✅ Wrote:")} ${outFile}`);
 };
 
 run().catch((err) => {
