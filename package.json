@@ -12,4 +12,9 @@
   "keywords": [],
   "author": "Johan Nordström <johan@digitalvillage.se>",
   "license": "ISC"
+  ,
+  "dependencies": {
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5"
+  }
 }
