@@ -5,6 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import axios from "axios";
 import dotenv from "dotenv";
+import readline from "node:readline";
 
 const pad = (n, len = 2) => String(n).padStart(len, "0");
 const padIndex = (n, len = 6) => String(n).padStart(len, "0");
@@ -47,13 +48,206 @@ const escapeForDrawText = (s) =>
 		.replaceAll(":", "\\:")
 		.replaceAll("'", "\\'");
 
-const parseArgs = () => {
+const parseBoolean = (value) => {
+	if (typeof value === "boolean") return value;
+	if (value == null) return undefined;
+	const s = String(value).trim().toLowerCase();
+	if (["true", "1", "yes", "y"].includes(s)) return true;
+	if (["false", "0", "no", "n"].includes(s)) return false;
+	return undefined;
+};
+
+const parseNumber = (value) => {
+	if (typeof value === "number") return Number.isFinite(value) ? value : undefined;
+	if (value == null) return undefined;
+	const n = Number(value);
+	return Number.isFinite(n) ? n : undefined;
+};
+
+const parseConfigFile = (filePath) => {
+	const raw = fs.readFileSync(filePath, "utf8");
+	if (path.extname(filePath).toLowerCase() === ".json") {
+		const data = JSON.parse(raw);
+		if (!data || typeof data !== "object") throw new Error("config JSON must be an object");
+		return { type: "json", data };
+	}
+	return { type: "env", data: dotenv.parse(raw) };
+};
+
+const configDisplayName = (filePath, parsed) => {
+	if (parsed?.type === "json") {
+		const name = parsed.data?.name || parsed.data?.printerName;
+		if (typeof name === "string" && name.trim()) return `${path.basename(filePath)} (${name.trim()})`;
+	}
+	return path.basename(filePath);
+};
+
+const listConfigCandidates = () => {
+	const roots = [
+		path.resolve(process.cwd(), "configs"),
+		path.resolve(process.cwd(), "config"),
+	];
+	const out = [];
+	for (const dir of roots) {
+		if (!fs.existsSync(dir)) continue;
+		const entries = fs.readdirSync(dir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (!entry.isFile()) continue;
+			const name = entry.name;
+			if (name.endsWith(".json") || name === ".env" || name.startsWith(".env.")) {
+				out.push(path.join(dir, name));
+			}
+		}
+	}
+	return out;
+};
+
+const promptForConfig = (candidates) =>
+	new Promise((resolve) => {
+		const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+		rl.question("Select a config number: ", (answer) => {
+			rl.close();
+			const idx = Number(answer);
+			if (!Number.isFinite(idx) || idx < 1 || idx > candidates.length) {
+				resolve(null);
+				return;
+			}
+			resolve(candidates[idx - 1]);
+		});
+	});
+
+const selectConfig = async (configPaths) => {
+	const resolved = configPaths.map((p) => path.resolve(process.cwd(), p));
+	const candidates = resolved.length > 0 ? resolved : listConfigCandidates();
+	if (candidates.length === 0) return null;
+	if (candidates.length === 1) return candidates[0];
+
+	if (!process.stdin.isTTY) {
+		throw new Error("Multiple configs available; rerun in a TTY or pass --config <path>.");
+	}
+
+	const parsed = candidates.map((candidate) => {
+		try {
+			const cfg = parseConfigFile(candidate);
+			return { path: candidate, parsed: cfg, label: configDisplayName(candidate, cfg) };
+		} catch (err) {
+			return { path: candidate, parsed: null, label: `${path.basename(candidate)} (unreadable)` };
+		}
+	});
+
+	console.log("Available configs:");
+	for (let i = 0; i < parsed.length; i++) {
+		console.log(`  ${i + 1}) ${parsed[i].label}`);
+	}
+
+	const chosen = await promptForConfig(parsed.map((entry) => entry.path));
+	if (!chosen) throw new Error("No config selected.");
+	return chosen;
+};
+
+const applyConfigToOpts = (opts, config) => {
+	if (!config) return;
+	const setIfDefined = (key, value) => {
+		if (value === undefined || value === null || value === "") return;
+		opts[key] = value;
+	};
+	const setBool = (key, value) => {
+		const v = parseBoolean(value);
+		if (v === undefined) return;
+		opts[key] = v;
+	};
+	const setNumber = (key, value) => {
+		const v = parseNumber(value);
+		if (v === undefined) return;
+		opts[key] = v;
+	};
+
+	if (config.type === "json") {
+		const data = config.data;
+		setIfDefined("url", data.url);
+		setIfDefined("baseDir", data.baseDir ? path.resolve(data.baseDir) : undefined);
+		setNumber("interval", data.interval);
+		setBool("intervalLocked", data.intervalLocked);
+		setIfDefined("prefix", data.prefix);
+		setIfDefined("ext", data.ext);
+		setIfDefined("transport", data.transport);
+		setNumber("quality", data.quality);
+
+		setBool("timestamp", data.timestamp);
+		setIfDefined("font", data.font);
+		setNumber("fontsize", data.fontsize);
+		setNumber("padding", data.padding);
+		setNumber("boxOpacity", data.boxOpacity);
+		setNumber("boxBorder", data.boxBorder);
+
+		setBool("ignoreDecodeErrors", data.ignoreDecodeErrors);
+		setIfDefined("loglevel", data.loglevel);
+
+		setIfDefined("prusaLinkIp", data.prusaLinkIp);
+		setIfDefined("prusaLinkUrl", data.prusaLinkUrl);
+		setIfDefined("prusaLinkApiKey", data.prusaLinkApiKey);
+		setIfDefined("statusUrl", data.statusUrl);
+		setNumber("statusInterval", data.statusInterval);
+		setIfDefined("statusHeader", data.statusHeader);
+		setIfDefined("statusPath", data.statusPath);
+		setIfDefined("statusDone", data.statusDone);
+		setBool("waitForPrinting", data.waitForPrinting);
+		setNumber("waitTimeout", data.waitTimeout);
+		setIfDefined("captureHeader", data.captureHeader);
+		setBool("discoverCamera", data.discoverCamera);
+		setBool("probeCamera", data.probeCamera);
+		setIfDefined("cameraId", data.cameraId);
+		setNumber("cameraIndex", data.cameraIndex);
+		setIfDefined("cameraName", data.cameraName);
+	} else {
+		const data = config.data;
+		setIfDefined("url", data.RTSP_URL || data.URL);
+		setIfDefined("baseDir", data.BASE_DIR ? path.resolve(data.BASE_DIR) : undefined);
+		setNumber("interval", data.INTERVAL);
+		setIfDefined("prefix", data.PREFIX);
+		setIfDefined("ext", data.EXT);
+		setIfDefined("transport", data.TRANSPORT);
+		setNumber("quality", data.QUALITY);
+
+		setBool("timestamp", data.TIMESTAMP);
+		setIfDefined("font", data.FONT);
+		setNumber("fontsize", data.FONTSIZE);
+		setNumber("padding", data.PADDING);
+		setNumber("boxOpacity", data.BOX_OPACITY);
+		setNumber("boxBorder", data.BOX_BORDER);
+
+		setBool("ignoreDecodeErrors", data.IGNORE_DECODE_ERRORS);
+		setIfDefined("loglevel", data.LOGLEVEL);
+
+		setIfDefined("prusaLinkIp", data.PRUSALINK_IP);
+		setIfDefined("prusaLinkUrl", data.PRUSALINK_URL);
+		setIfDefined("prusaLinkApiKey", data.PRUSALINK_API_KEY);
+		setIfDefined("statusUrl", data.STATUS_URL);
+		setNumber("statusInterval", data.STATUS_INTERVAL);
+		setIfDefined("statusHeader", data.STATUS_HEADER);
+		setIfDefined("statusPath", data.STATUS_PATH);
+		setIfDefined("statusDone", data.STATUS_DONE);
+		setBool("waitForPrinting", data.WAIT_FOR_PRINTING);
+		setNumber("waitTimeout", data.WAIT_TIMEOUT);
+		setIfDefined("captureHeader", data.CAPTURE_HEADER);
+		setBool("discoverCamera", data.DISCOVER_CAMERA);
+		setBool("probeCamera", data.PROBE_CAMERA);
+		setIfDefined("cameraId", data.CAMERA_ID);
+		setNumber("cameraIndex", data.CAMERA_INDEX);
+		setIfDefined("cameraName", data.CAMERA_NAME);
+	}
+};
+
+const parseArgs = async () => {
 	const args = process.argv.slice(2);
 	const env = process.env;
+	const configPaths = [];
+	const overrides = {};
 	const out = {
 		url: env.RTSP_URL || "rtsp://192.168.1.186/live",
 		baseDir: path.resolve(process.cwd(), "snapshots"),
 		interval: 5,
+		intervalLocked: false,
 		prefix: "frame_",
 		ext: "jpg",
 		transport: "tcp", // tcp|udp
@@ -70,6 +264,7 @@ const parseArgs = () => {
 		loglevel: "fatal",
 
 		prusaLinkIp: env.PRUSALINK_IP || null,
+		prusaLinkUrl: env.PRUSALINK_URL || null,
 		prusaLinkApiKey: env.PRUSALINK_API_KEY || null,
 
 		statusUrl: null,
@@ -79,36 +274,64 @@ const parseArgs = () => {
 		statusDone: "idle,finished,stopped,canceled,error",
 		waitForPrinting: true,
 		waitTimeout: 0,
+
+		captureHeader: env.CAPTURE_HEADER || null,
+
+		discoverCamera: false,
+		probeCamera: true,
+		cameraId: null,
+		cameraIndex: null,
+		cameraName: null,
 	};
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i];
 		const v = args[i + 1];
 
-		if (a === "--url") out.url = v, i++;
-		else if (a === "--dir") out.baseDir = path.resolve(v), i++;
-		else if (a === "--interval") out.interval = Number(v), i++;
-		else if (a === "--prefix") out.prefix = v, i++;
-		else if (a === "--ext") out.ext = v, i++;
-		else if (a === "--transport") out.transport = v, i++;
-		else if (a === "--quality") out.quality = Number(v), i++;
+		if (a === "--config" || a === "-c") {
+			if (!v) throw new Error("--config requires a path");
+			const parts = v.split(",").map((p) => p.trim()).filter(Boolean);
+			configPaths.push(...parts);
+			i++;
+		}
 
-		else if (a === "--timestamp") out.timestamp = v !== "false", i++;
-		else if (a === "--font") out.font = v, i++;
-		else if (a === "--fontsize") out.fontsize = Number(v), i++;
+		else if (a === "--url") overrides.url = v, i++;
+		else if (a === "--dir") overrides.baseDir = path.resolve(v), i++;
+		else if (a === "--interval") overrides.interval = Number(v), overrides.intervalLocked = true, i++;
+		else if (a === "--prefix") overrides.prefix = v, i++;
+		else if (a === "--ext") overrides.ext = v, i++;
+		else if (a === "--transport") overrides.transport = v, i++;
+		else if (a === "--quality") overrides.quality = Number(v), i++;
 
-		else if (a === "--ignoreDecodeErrors") out.ignoreDecodeErrors = v !== "false", i++;
-		else if (a === "--loglevel") out.loglevel = v, i++;
+		else if (a === "--timestamp") overrides.timestamp = v !== "false", i++;
+		else if (a === "--font") overrides.font = v, i++;
+		else if (a === "--fontsize") overrides.fontsize = Number(v), i++;
 
-		else if (a === "--prusalink-ip") out.prusaLinkIp = v, i++;
-		else if (a === "--prusalink-key") out.prusaLinkApiKey = v, i++;
+		else if (a === "--ignoreDecodeErrors") overrides.ignoreDecodeErrors = v !== "false", i++;
+		else if (a === "--loglevel") overrides.loglevel = v, i++;
 
-		else if (a === "--status-url") out.statusUrl = v, i++;
-		else if (a === "--status-interval") out.statusInterval = Number(v), i++;
-		else if (a === "--status-header") out.statusHeader = v, i++;
-		else if (a === "--status-path") out.statusPath = v, i++;
-		else if (a === "--status-done") out.statusDone = v, i++;
-		else if (a === "--wait-for-printing") out.waitForPrinting = v !== "false", i++;
-		else if (a === "--wait-timeout") out.waitTimeout = Number(v), i++;
+		else if (a === "--prusalink-ip") overrides.prusaLinkIp = v, i++;
+		else if (a === "--prusalink-key") overrides.prusaLinkApiKey = v, i++;
+		else if (a === "--prusalink-url") overrides.prusaLinkUrl = v, i++;
+
+		else if (a === "--discover-camera") overrides.discoverCamera = v !== "false", i++;
+		else if (a === "--probe-camera") overrides.probeCamera = v !== "false", i++;
+		else if (a === "--camera-id") overrides.cameraId = v, i++;
+		else if (a === "--camera-index") overrides.cameraIndex = Number(v), i++;
+		else if (a === "--camera-name") overrides.cameraName = v, i++;
+
+		else if (a === "--status-url") overrides.statusUrl = v, i++;
+		else if (a === "--status-interval") overrides.statusInterval = Number(v), i++;
+		else if (a === "--status-header") overrides.statusHeader = v, i++;
+		else if (a === "--status-path") overrides.statusPath = v, i++;
+		else if (a === "--status-done") overrides.statusDone = v, i++;
+		else if (a === "--wait-for-printing") overrides.waitForPrinting = v !== "false", i++;
+		else if (a === "--wait-timeout") overrides.waitTimeout = Number(v), i++;
+
+		else if (a === "--capture-header") overrides.captureHeader = v, i++;
+
+		else if (!a.startsWith("-")) {
+			configPaths.push(a);
+		}
 
 		else if (a === "-h" || a === "--help") {
 			console.log(`
@@ -116,7 +339,9 @@ Usage:
 	node capture-timelapse.mjs [options]
 
 Options:
-	--url         RTSP url (default: rtsp://192.168.1.186/live)
+	--config      Path(s) to config files (repeat or comma-separated)
+	              (positional config paths are also accepted)
+	--url         Input URL (rtsp://... or http(s)://...) (default: rtsp://192.168.1.186/live)
 	--dir         Base output folder (default: ./snapshots)
 	--interval    Seconds between snapshots (default: 5)
 	--prefix      Filename prefix (default: frame_)
@@ -136,6 +361,17 @@ Noise/robustness:
 PrusaLink (local API):
 	--prusalink-ip   Printer IP address (or set PRUSALINK_IP in .env)
 	--prusalink-key  API key (or set PRUSALINK_API_KEY in .env)
+	--prusalink-url  Base URL (http://host:port) if not using IP
+
+Capture input:
+	--capture-header Optional header in "Key: Value" format for the capture URL
+
+PrusaLink camera discovery:
+	--discover-camera true|false (default: false)
+	--probe-camera    true|false (default: true)
+	--camera-id       Camera id to select
+	--camera-index    Camera index to select (0-based)
+	--camera-name     Camera name to select
 
 Printer status polling:
 	--status-url      Status endpoint that returns JSON (default: disabled)
@@ -152,15 +388,25 @@ Controls:
 			process.exit(0);
 		}
 	}
-	if (!Number.isFinite(out.interval) || out.interval <= 0) throw new Error("--interval must be > 0");
+
+	const selectedConfig = await selectConfig(configPaths);
+	if (selectedConfig) {
+		const parsed = parseConfigFile(selectedConfig);
+		applyConfigToOpts(out, parsed);
+	}
+	applyConfigToOpts(out, { type: "json", data: overrides });
+
 	if (out.statusUrl && (!Number.isFinite(out.statusInterval) || out.statusInterval <= 0)) {
 		throw new Error("--status-interval must be > 0");
 	}
 	if (out.waitTimeout && (!Number.isFinite(out.waitTimeout) || out.waitTimeout < 0)) {
 		throw new Error("--wait-timeout must be >= 0");
 	}
-	if (!out.statusUrl && out.prusaLinkIp && out.prusaLinkApiKey) {
-		out.statusUrl = `http://${out.prusaLinkIp}/api/v1/status`;
+	if (!out.statusUrl && (out.prusaLinkIp || out.prusaLinkUrl) && out.prusaLinkApiKey) {
+		const baseUrl = out.prusaLinkUrl
+			? out.prusaLinkUrl.replace(/\/+$/, "")
+			: `http://${out.prusaLinkIp}`;
+		out.statusUrl = `${baseUrl}/api/v1/status`;
 		out.statusHeader = `X-Api-Key: ${out.prusaLinkApiKey}`;
 	}
 	return out;
@@ -194,15 +440,241 @@ const readPath = (obj, pathStr) => {
 
 const buildStatusHeaders = (opts) => {
 	const headers = {};
-	if (opts.statusHeader) {
-		const idx = opts.statusHeader.indexOf(":");
+	const headerValue = opts.statusHeader;
+	if (headerValue) {
+		const idx = headerValue.indexOf(":");
 		if (idx !== -1) {
-			const key = opts.statusHeader.slice(0, idx).trim();
-			const value = opts.statusHeader.slice(idx + 1).trim();
+			const key = headerValue.slice(0, idx).trim();
+			const value = headerValue.slice(idx + 1).trim();
 			if (key && value) headers[key] = value;
 		}
 	}
 	return headers;
+};
+
+const getPrusaLinkBaseUrl = (opts) => {
+	if (opts.prusaLinkUrl) return opts.prusaLinkUrl.replace(/\/+$/, "");
+	if (opts.prusaLinkIp) return `http://${opts.prusaLinkIp}`;
+	return null;
+};
+
+const normalizeCameraList = (data) => {
+	if (Array.isArray(data)) return data;
+	if (Array.isArray(data?.camera_list)) return data.camera_list;
+	if (Array.isArray(data?.cameras)) return data.cameras;
+	if (Array.isArray(data?.data)) return data.data;
+	return [];
+};
+
+const resolveMaybeRelativeUrl = (baseUrl, value) => {
+	if (!value) return null;
+	if (/^https?:\/\//i.test(value) || /^rtsp:\/\//i.test(value)) return value;
+	if (!baseUrl) return value;
+	if (!value.startsWith("/")) return `${baseUrl}/${value}`;
+	return `${baseUrl}${value}`;
+};
+
+const appendQueryParam = (url, key, value) => {
+	if (!url || value == null || value === "") return url;
+	const sep = url.includes("?") ? "&" : "?";
+	return `${url}${sep}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+};
+
+const buildSnapshotUrlCandidates = (camera, baseUrl) => {
+	const rawCandidates = [
+		camera?.snapshot_url,
+		camera?.snapshotUrl,
+		camera?.snapshot,
+		camera?.snapshotURL,
+		camera?.urls?.snapshot,
+		camera?.endpoints?.snapshot,
+		camera?.links?.snapshot,
+		camera?.snapshot_path,
+	];
+	const candidates = [];
+	for (const candidate of rawCandidates) {
+		const resolved = resolveMaybeRelativeUrl(baseUrl, candidate);
+		if (resolved) candidates.push(resolved);
+	}
+
+	const id = camera?.camera_id ?? camera?.id ?? camera?.uuid;
+	if (id && baseUrl) {
+		candidates.push(`${baseUrl}/api/v1/cameras/${id}/snapshot`);
+		candidates.push(`${baseUrl}/api/v1/cameras/${id}/snapshot.jpg`);
+		candidates.push(`${baseUrl}/api/v1/cameras/${id}/snapshot.png`);
+		candidates.push(`${baseUrl}/api/v1/cameras/${id}/snap`);
+		candidates.push(`${baseUrl}/api/v1/cameras/${id}/snap.jpg`);
+		candidates.push(`${baseUrl}/api/v1/cameras/${id}/snap.png`);
+	}
+
+	const token = camera?.config?.token;
+	if (token) {
+		const extra = candidates.map((url) => appendQueryParam(url, "token", token));
+		candidates.push(...extra);
+	}
+
+	return Array.from(new Set(candidates));
+};
+
+const getCameraSnapshotUrl = (camera, baseUrl) => {
+	const candidates = buildSnapshotUrlCandidates(camera, baseUrl);
+	return candidates[0] || null;
+};
+
+const probeSnapshotUrl = async (opts, candidates) => {
+	const headers = {};
+	if (opts.prusaLinkApiKey) headers["X-Api-Key"] = opts.prusaLinkApiKey;
+	if (opts.captureHeader) {
+		const idx = opts.captureHeader.indexOf(":");
+		if (idx !== -1) {
+			const key = opts.captureHeader.slice(0, idx).trim();
+			const value = opts.captureHeader.slice(idx + 1).trim();
+			if (key && value) headers[key] = value;
+		}
+	}
+
+	for (const url of candidates) {
+		try {
+			const res = await axios.get(url, {
+				headers,
+				responseType: "arraybuffer",
+				timeout: 8000,
+				validateStatus: (status) => status >= 200 && status < 300,
+			});
+			if (res.status >= 200 && res.status < 300) return url;
+		} catch (err) {
+			if (err?.response?.status === 404) continue;
+		}
+	}
+	return null;
+};
+
+const getCameraInterval = (camera) => {
+	const candidates = [
+		camera?.interval,
+		camera?.snapshot_interval,
+		camera?.snapshotInterval,
+		camera?.configuration?.interval,
+		camera?.configuration?.snapshot_interval,
+		camera?.settings?.interval,
+		camera?.config?.interval,
+	];
+	for (const candidate of candidates) {
+		const n = parseNumber(candidate);
+		if (n !== undefined) return n;
+	}
+	const trigger = camera?.config?.trigger_scheme;
+	if (typeof trigger === "string") {
+		const match = trigger.match(/([0-9]+)\s*SEC/i);
+		if (match) {
+			const n = Number(match[1]);
+			if (Number.isFinite(n) && n > 0) return n;
+		}
+		const wordMap = {
+			ONE: 1,
+			TWO: 2,
+			THREE: 3,
+			FIVE: 5,
+			TEN: 10,
+			FIFTEEN: 15,
+			TWENTY: 20,
+			THIRTY: 30,
+			SIXTY: 60,
+		};
+		const wordMatch = trigger.match(/([A-Z]+)_SEC/i);
+		if (wordMatch && wordMap[wordMatch[1]]) return wordMap[wordMatch[1]];
+	}
+	return null;
+};
+
+const cameraDisplayName = (camera, index) => {
+	const name = camera?.name || camera?.title || camera?.config?.name;
+	const id = camera?.camera_id ?? camera?.id ?? camera?.uuid;
+	if (name && id !== undefined) return `${name} (id ${id})`;
+	if (name) return name;
+	if (id !== undefined) return `Camera ${id}`;
+	return `Camera ${index + 1}`;
+};
+
+const promptForCamera = (cameras) =>
+	new Promise((resolve) => {
+		const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+		rl.question("Select a camera number: ", (answer) => {
+			rl.close();
+			const idx = Number(answer);
+			if (!Number.isFinite(idx) || idx < 1 || idx > cameras.length) {
+				resolve(null);
+				return;
+			}
+			resolve(cameras[idx - 1]);
+		});
+	});
+
+const selectCamera = async (opts, cameras) => {
+	if (opts.cameraIndex != null) {
+		const idx = Number(opts.cameraIndex);
+		if (Number.isFinite(idx) && idx >= 0 && idx < cameras.length) return cameras[idx];
+	}
+	if (opts.cameraId != null) {
+		const id = String(opts.cameraId);
+		const match = cameras.find((camera) => String(camera?.camera_id ?? camera?.id ?? camera?.uuid) === id);
+		if (match) return match;
+	}
+	if (opts.cameraName) {
+		const name = String(opts.cameraName).toLowerCase();
+		const match = cameras.find((camera) => String(camera?.name ?? camera?.title ?? "").toLowerCase() === name);
+		if (match) return match;
+	}
+	if (cameras.length === 1) return cameras[0];
+	if (!process.stdin.isTTY) return cameras[0];
+
+	console.log("Available cameras:");
+	for (let i = 0; i < cameras.length; i++) {
+		console.log(`  ${i + 1}) ${cameraDisplayName(cameras[i], i)}`);
+	}
+	const chosen = await promptForCamera(cameras);
+	if (!chosen) throw new Error("No camera selected.");
+	return chosen;
+};
+
+const discoverPrusaLinkCamera = async (opts) => {
+	if (!opts.discoverCamera) return;
+	const baseUrl = getPrusaLinkBaseUrl(opts);
+	if (!baseUrl) throw new Error("discoverCamera requires prusaLinkIp or prusaLinkUrl");
+	if (!opts.prusaLinkApiKey) throw new Error("discoverCamera requires prusaLinkApiKey");
+
+	const res = await axios.get(`${baseUrl}/api/v1/cameras`, {
+		headers: { "X-Api-Key": opts.prusaLinkApiKey },
+		timeout: 10000,
+	});
+	const cameras = normalizeCameraList(res.data);
+	if (cameras.length === 0) {
+		console.log("⚠️  No cameras found on PrusaLink");
+		console.log("Queried URL:", `${baseUrl}/api/v1/cameras`);
+		console.log("Response data:", JSON.stringify(res.data, null, 2));
+		throw new Error("No cameras returned from PrusaLink")
+	};
+
+	const camera = await selectCamera(opts, cameras);
+	const candidates = buildSnapshotUrlCandidates(camera, baseUrl);
+	const snapshotUrl = opts.probeCamera ? await probeSnapshotUrl(opts, candidates) : candidates[0] || null;
+	if (!snapshotUrl) throw new Error("Selected camera has no snapshot URL");
+
+	opts.url = snapshotUrl;
+	if (!opts.captureHeader) {
+		opts.captureHeader = `X-Api-Key: ${opts.prusaLinkApiKey}`;
+	}
+
+	const interval = getCameraInterval(camera);
+	if (interval != null && interval > 0 && !opts.intervalLocked) {
+		opts.interval = interval;
+	}
+	opts.cameraInfo = {
+		id: camera?.camera_id ?? camera?.id ?? camera?.uuid ?? null,
+		name: camera?.name ?? camera?.title ?? camera?.config?.name ?? null,
+		interval,
+		url: snapshotUrl,
+	};
 };
 
 const formatDuration = (totalSeconds) => {
@@ -249,7 +721,28 @@ const fetchStatusData = async (opts) => {
 };
 
 const run = async () => {
-	const opts = parseArgs();
+	const opts = await parseArgs();
+
+	if (opts.discoverCamera) {
+		try {
+			await discoverPrusaLinkCamera(opts);
+			if (opts.cameraInfo) {
+				const details = [
+					opts.cameraInfo.name ? `name: ${opts.cameraInfo.name}` : null,
+					opts.cameraInfo.id != null ? `id: ${opts.cameraInfo.id}` : null,
+					opts.cameraInfo.interval != null ? `interval: ${opts.cameraInfo.interval}s` : null,
+				].filter(Boolean);
+				console.log(`📷 PrusaLink camera selected (${details.join(", ")})`);
+			}
+		} catch (err) {
+			console.error(`❌ camera discovery failed: ${err?.message ?? err}`);
+			process.exit(1);
+		}
+	}
+
+	if (!Number.isFinite(opts.interval) || opts.interval <= 0) {
+		throw new Error("--interval must be > 0");
+	}
 
 	const runDir = path.join(opts.baseDir, formatRunStamp());
 	fs.mkdirSync(runDir, { recursive: true });
@@ -309,6 +802,7 @@ const run = async () => {
 			const filename = `${opts.prefix}${padIndex(index)}.${opts.ext}`;
 			const outFile = path.join(runDir, filename);
 
+			const isRtsp = typeof opts.url === "string" && opts.url.startsWith("rtsp://");
 			const ffmpegArgs = [
 				"-hide_banner",
 				"-loglevel",
@@ -325,7 +819,18 @@ const run = async () => {
 				ffmpegArgs.push("-fflags", "+discardcorrupt", "-err_detect", "ignore_err");
 			}
 
-			ffmpegArgs.push("-rtsp_transport", opts.transport, "-i", opts.url, "-an");
+			if (opts.captureHeader) {
+				const headerLine = opts.captureHeader.endsWith("\r\n")
+					? opts.captureHeader
+					: `${opts.captureHeader}\r\n`;
+				ffmpegArgs.push("-headers", headerLine);
+			}
+
+			if (isRtsp) {
+				ffmpegArgs.push("-rtsp_transport", opts.transport);
+			}
+
+			ffmpegArgs.push("-i", opts.url, "-an");
 
 			if (opts.timestamp) {
 				const { filter, fontExists } = buildDrawTextFilter(opts);

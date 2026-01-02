@@ -6,6 +6,8 @@
   "main": "index.js",
   "scripts": {
     "capture": "node capture-timelapse.mjs",
+    "capture-coreone": "node capture-timelapse.mjs --config configs/coreone.json",
+    "capture-mk3s": "node capture-timelapse.mjs --config configs/mk3s.json",
     "make": "node make-timelapse.mjs",
     "test": "echo \"Error: no test specified\" && exit 1"
   },

@@ -33,7 +33,8 @@ Each run creates a timestamped folder under `snapshots/` with images and `_timel
 ### Capture options
 
 ```
---url         RTSP url (default: rtsp://192.168.1.186/live)
+--config      Path(s) to config files (repeat or comma-separated)
+--url         Input URL (rtsp://... or http(s)://...) (default: rtsp://192.168.1.186/live)
 --dir         Base output folder (default: ./snapshots)
 --interval    Seconds between snapshots (default: 5)
 --prefix      Filename prefix (default: frame_)
@@ -50,6 +51,14 @@ Each run creates a timestamped folder under `snapshots/` with images and `_timel
 
 --prusalink-ip   Printer IP address (or set PRUSALINK_IP in .env)
 --prusalink-key  API key (or set PRUSALINK_API_KEY in .env)
+--prusalink-url  Base URL (http://host:port) if not using IP
+
+--capture-header Optional header in "Key: Value" format for the capture URL
+
+--discover-camera true|false (default: false)
+--camera-id       Camera id to select
+--camera-index    Camera index to select (0-based)
+--camera-name     Camera name to select
 
 --status-url      Status endpoint that returns JSON (default: disabled)
 --status-interval Seconds between polls (default: 30)
@@ -63,6 +72,51 @@ Each run creates a timestamped folder under `snapshots/` with images and `_timel
 Notes:
 - If `PRUSALINK_IP` and `PRUSALINK_API_KEY` are set, the script polls `http://<ip>/api/v1/status` automatically and stops on done status.
 - While printing, the status log includes progress percentage, elapsed time, remaining time, and ETA.
+- For PrusaLink webcam snapshots, set `--url` to the snapshot endpoint and pass `--capture-header "X-Api-Key: <key>"`.
+- When `--discover-camera` is enabled, the capture URL is pulled from PrusaLink and the snapshot interval is updated from the camera's configured interval (unless `--interval` is provided).
+
+### Config files
+
+You can store capture settings in JSON or `.env` files under `./configs` or `./config`. Pass configs with `--config` (or as positional paths). If you pass multiple, the script prompts you to choose. If you omit configs and multiple exist, it will also prompt.
+
+#### i3 MK3S+ with USB web camera
+
+Example `configs/mk3s.json`:
+
+USB Web camera connected to Raspberry Pi running PrusaLink.
+
+```json
+{
+  "name": "MK3S+ PrusaLink (Pi camera)",
+  "prusaLinkIp": "192.168.1.191",
+  "prusaLinkApiKey": "YOUR_PRUSALINK_KEY",
+  "discoverCamera": true,
+  "timestamp": true
+}
+```
+
+#### CoreOne+ with Buddy3D camera
+
+Example `configs/coreone.json`:
+
+Buddy3D camera connected over wifi.
+
+```json
+{
+  "name": "CoreOne+ Buddy3D (RTSP)",
+  "url": "rtsp://192.168.1.186/live",
+  "transport": "tcp",
+  "prusaLinkIp": "192.168.1.124",
+  "prusaLinkApiKey": "YOUR_PRUSALINK_KEY",
+  "timestamp": true
+}
+```
+
+Example usage:
+
+```bash
+node capture-timelapse.mjs --config configs/mk4.json,configs/mk3s-prusalink.json
+```
 
 ## Make a timelapse video
 
