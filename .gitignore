@@ -1,3 +1,4 @@
+configs/
 node_modules/
 snapshots/
 .env
