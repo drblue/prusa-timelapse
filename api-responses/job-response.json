@@ -1,0 +1,69 @@
+{
+    "file": {
+        "name": "clip-classic-hole_0.2mm_PLA_MK3S_37m.gcode",
+        "display_name": "clip-classic-hole_0.2mm_PLA_MK3S_37m.gcode",
+        "path": "/PrusaLink gcodes/clip-classic-hole_0.2mm_PLA_MK3S_37m.gcode",
+        "display_path": "/PrusaLink gcodes/clip-classic-hole_0.2mm_PLA_MK3S_37m.gcode",
+        "size": 1259218,
+        "m_timestamp": 1767367052,
+        "refs": {
+            "download": "/api/files/local/PrusaLink gcodes/clip-classic-hole_0.2mm_PLA_MK3S_37m.gcode/raw",
+            "icon": null,
+            "thumbnail": "/api/thumbnails/PrusaLink gcodes/clip-classic-hole_0.2mm_PLA_MK3S_37m.gcode.orig.png"
+        },
+        "meta": {
+            "estimated printing time (normal mode)": "36m 54s",
+            "printer_model": "MK3S",
+            "layer_height": 0.2,
+            "filament_type": "PLA",
+            "normal_percent_present": true,
+            "normal_left_present": true,
+            "quiet_percent_present": true,
+            "quiet_left_present": true,
+            "layer_info_present": true,
+            "max_layer_z": 6,
+            "filament used [mm] per tool": [
+                1613.5
+            ],
+            "filament used [mm]": 1613.5,
+            "filament used [cm3] per tool": [
+                3.88
+            ],
+            "filament used [cm3]": 3.88,
+            "filament used [g] per tool": [
+                4.81
+            ],
+            "filament used [g]": 4.81,
+            "filament cost per tool": [
+                0.12
+            ],
+            "filament cost": 0.12,
+            "bed_temperature per tool": [
+                60
+            ],
+            "bed_temperature": 60,
+            "brim_width": 0,
+            "filament_type per tool": [
+                "PLA"
+            ],
+            "fill_density": "15%",
+            "ironing": 0,
+            "nozzle_diameter per tool": [
+                0.4
+            ],
+            "nozzle_diameter": 0.4,
+            "support_material": 0,
+            "temperature per tool": [
+                210
+            ],
+            "temperature": 210,
+            "estimated_print_time": 2214
+        }
+    },
+    "id": 18,
+    "state": "PRINTING",
+    "progress": 0,
+    "time_remaining": 2160,
+    "time_printing": 0,
+    "inaccurate_estimates": false
+}

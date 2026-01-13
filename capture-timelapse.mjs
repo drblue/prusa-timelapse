@@ -246,7 +246,7 @@ const parseArgs = async () => {
 	const out = {
 		url: env.RTSP_URL || "rtsp://192.168.1.186/live",
 		baseDir: path.resolve(process.cwd(), "snapshots"),
-		interval: 5,
+		interval: 10,
 		intervalLocked: false,
 		prefix: "frame_",
 		ext: "jpg",
@@ -720,6 +720,20 @@ const fetchStatusData = async (opts) => {
 	return res.data;
 };
 
+const fetchJobData = async (opts) => {
+	const baseUrl = getPrusaLinkBaseUrl(opts);
+	if (!baseUrl || !opts.prusaLinkApiKey) return null;
+
+	const headers = { "X-Api-Key": opts.prusaLinkApiKey };
+	try {
+		const res = await axios.get(`${baseUrl}/api/v1/job`, { headers, timeout: 10000 });
+		return res.data;
+	} catch (err) {
+		console.error(`⚠️  job fetch failed: ${err?.message ?? "(no error message)"}`);
+		return null;
+	}
+};
+
 const run = async () => {
 	const opts = await parseArgs();
 
@@ -763,32 +777,37 @@ const run = async () => {
 		}
 	}
 
-	fs.writeFileSync(
-		path.join(runDir, "_timelapse_meta.json"),
-		JSON.stringify(
-			{
-				createdAt: new Date().toISOString(),
-				url: opts.url,
-				intervalSeconds: opts.interval,
-				prefix: opts.prefix,
-				ext: opts.ext,
-				timestampOverlay: opts.timestamp,
-				font: opts.font,
-				transport: opts.transport,
-				status: opts.statusUrl
-					? {
-							url: opts.statusUrl,
-							path: opts.statusPath,
-							intervalSeconds: opts.statusInterval,
-							doneStates: opts.statusDone.split(",").map((v) => v.trim()).filter(Boolean),
-							initialSnapshot: statusSnapshot,
-						}
-					: null,
-			},
-			null,
-			2
-		) + "\n"
-	);
+	const writeMetaFile = (jobInfo = null) => {
+		fs.writeFileSync(
+			path.join(runDir, "_timelapse_meta.json"),
+			JSON.stringify(
+				{
+					createdAt: new Date().toISOString(),
+					url: opts.url,
+					intervalSeconds: opts.interval,
+					prefix: opts.prefix,
+					ext: opts.ext,
+					timestampOverlay: opts.timestamp,
+					font: opts.font,
+					transport: opts.transport,
+					status: opts.statusUrl
+						? {
+								url: opts.statusUrl,
+								path: opts.statusPath,
+								intervalSeconds: opts.statusInterval,
+								doneStates: opts.statusDone.split(",").map((v) => v.trim()).filter(Boolean),
+								initialSnapshot: statusSnapshot,
+							}
+						: null,
+					job: jobInfo,
+				},
+				null,
+				2
+			) + "\n"
+		);
+	};
+
+	writeMetaFile();
 
 	let index = 1;
 	let running = true;
@@ -796,6 +815,7 @@ const run = async () => {
 	let wantStop = false;
 	let warnedFontMissing = false;
 	let statusTimer = null;
+	let jobInfoCaptured = false;
 
 	const takeSnapshot = () =>
 		new Promise((resolve, reject) => {
@@ -855,6 +875,18 @@ const run = async () => {
 			p.on("exit", (code) => (code === 0 ? resolve(outFile) : reject(new Error(`ffmpeg exited with code ${code}`))));
 		});
 
+	const captureSnapshotStatus = async () => {
+		if (!opts.statusUrl) return;
+		try {
+			const statusData = await fetchStatusData(opts);
+			const statusFilename = `${opts.prefix}${padIndex(index)}_status.json`;
+			const statusFile = path.join(runDir, statusFilename);
+			fs.writeFileSync(statusFile, JSON.stringify(statusData, null, 2) + "\n");
+		} catch (err) {
+			console.error(`⚠️  status capture failed: ${err?.message ?? "(no error message)"}`);
+		}
+	};
+
 	const stopNow = () => {
 		running = false;
 		clearInterval(timer);
@@ -871,6 +903,7 @@ const run = async () => {
 		capturing = true;
 
 		try {
+			await captureSnapshotStatus();
 			const outFile = await takeSnapshot();
 			// console.log(`✅ ${now.toLocaleTimeString()} 💾 ${path.basename(outFile)}`);
 			console.log(`✅ ${formatLocalTimestamp(new Date())} 💾 ${path.basename(outFile)}`);
@@ -900,7 +933,16 @@ const run = async () => {
 				} else {
 					console.log(`🖨️  ${stamp} status: ${String(value)}`);
 				}
-				if (typeof value === "string" && value.toLowerCase() === "printing") break;
+				if (typeof value === "string" && value.toLowerCase() === "printing") {
+					// Capture job info when printing starts
+					const jobData = await fetchJobData(opts);
+					if (jobData) {
+						console.log(`📋 Job info captured: ${jobData.file?.display_name ?? jobData.file?.name ?? "unknown"}`);
+						jobInfoCaptured = true;
+						writeMetaFile(jobData);
+					}
+					break;
+				}
 			} catch (err) {
 				console.error(`❌ status check failed: ${err?.message ?? err}`);
 			}
@@ -923,6 +965,17 @@ const run = async () => {
 				const data = await fetchStatusData(opts);
 				const value = readPath(data, opts.statusPath);
 				const stamp = formatLocalTimestamp(new Date());
+
+				// Capture job info if printer is PRINTING and we haven't captured it yet
+				if (!jobInfoCaptured && typeof value === "string" && value.toLowerCase() === "printing") {
+					const jobData = await fetchJobData(opts);
+					if (jobData) {
+						console.log(`📋 Job info captured: ${jobData.file?.display_name ?? jobData.file?.name ?? "unknown"}`);
+						jobInfoCaptured = true;
+						writeMetaFile(jobData);
+					}
+				}
+
 				if (value === undefined) {
 					console.log(`🖨️  ${stamp} status: (missing at ${opts.statusPath})`);
 				} else {
