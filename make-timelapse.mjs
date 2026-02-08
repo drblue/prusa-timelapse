@@ -419,7 +419,7 @@ const run = async () => {
 			telemetryLines.forEach((line, idx) => {
 				const escapedLine = line
 					.replace(/\\/g, "\\\\")
-					.replace(/%/g, "%%")
+					.replace(/%/g, "\\\\%")
 					.replace(/:/g, "\\:")
 					.replace(/'/g, "'\\''");
 				const yPos = 50 + (idx * 28);
