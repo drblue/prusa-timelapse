@@ -6,7 +6,7 @@ import process from "node:process";
 import axios from "axios";
 import dotenv from "dotenv";
 import readline from "node:readline";
-import { recordVideo } from "./record-video.ts";
+import { recordVideo, validateVideoAspect } from "./record-video.ts";
 
 const pad = (n, len = 2) => String(n).padStart(len, "0");
 const padIndex = (n, len = 6) => String(n).padStart(len, "0");
@@ -198,6 +198,8 @@ const applyConfigToOpts = (opts, config) => {
 
 		setBool("timestamp", data.timestamp);
 		setBool("video", data.video);
+		setBool("repairRtsp", data.repairRtsp);
+		setIfDefined("videoAspect", data.videoAspect);
 		setIfDefined("font", data.font);
 		setNumber("fontsize", data.fontsize);
 		setNumber("padding", data.padding);
@@ -235,6 +237,8 @@ const applyConfigToOpts = (opts, config) => {
 
 		setBool("timestamp", data.TIMESTAMP);
 		setBool("video", data.VIDEO);
+		setBool("repairRtsp", data.REPAIR_RTSP);
+		setIfDefined("videoAspect", data.VIDEO_ASPECT);
 		setIfDefined("font", data.FONT);
 		setNumber("fontsize", data.FONTSIZE);
 		setNumber("padding", data.PADDING);
@@ -273,6 +277,8 @@ const parseArgs = async () => {
 		baseDir: path.resolve(process.cwd(), "snapshots"),
 		interval: 10,
 		video: false,
+		repairRtsp: false,
+		videoAspect: null,
 		intervalLocked: false,
 		prefix: "frame_",
 		ext: "jpg",
@@ -321,6 +327,8 @@ const parseArgs = async () => {
 		}
 
 		else if (a === "--video") overrides.video = true;
+		else if (a === "--repair-rtsp") overrides.repairRtsp = v !== "false", i++;
+		else if (a === "--video-aspect") overrides.videoAspect = v, i++;
 		else if (a === "--url") overrides.url = v, i++;
 		else if (a === "--dir") overrides.baseDir = path.resolve(v), i++;
 		else if (a === "--interval") overrides.interval = Number(v), overrides.intervalLocked = true, i++;
@@ -367,6 +375,8 @@ Usage:
 
 Options:
 	--video       Record MP4; stop on printer completion when status is configured
+	--repair-rtsp true|false (default: false); Buddy3D H.264/TCP packet recovery
+	--video-aspect Display ratio such as 16:9 (default: source ratio)
 	--config      Path(s) to config files (repeat or comma-separated)
 	              (positional config paths are also accepted)
 	--url         Input URL (rtsp://... or http(s)://...) (default: rtsp://192.168.1.186/live)
@@ -424,6 +434,7 @@ Controls:
 		applyConfigToOpts(out, parsed);
 	}
 	applyConfigToOpts(out, { type: "json", data: overrides });
+	if (out.videoAspect) validateVideoAspect(out.videoAspect);
 
 	if (out.statusUrl && (!Number.isFinite(out.statusInterval) || out.statusInterval <= 0)) {
 		throw new Error("--status-interval must be > 0");

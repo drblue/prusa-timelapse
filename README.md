@@ -50,6 +50,20 @@ Usable parts are saved in `recording-parts/` and joined into `recording.mp4` wit
 
 This prevents detected decoding failures from being deliberately concealed and recorded as blocky frames. It cannot recover missing camera data or detect every visual defect already encoded by the camera. Persistent errors require investigating the source stream, camera connection, or camera firmware.
 
+For a Buddy3D camera with truncated TCP media packets, opt into packet recovery:
+
+```bash
+npm run capture-coreone -- --video --repair-rtsp true
+```
+
+Alternatively set `"repairRtsp": true` in its JSON config (`REPAIR_RTSP=true` in an env config). This mode uses a local TCP relay and still opens only one camera connection. It discards a damaged access unit and dependent pictures, resynchronizes on the camera's packet headers, and resumes at a complete IDR on the same connection. Original video timestamps retain missing time. Missing motion is still unrecoverable. Strict decoding and full reconnects remain the fallback for errors the relay cannot detect. Recovery mode allows 15 seconds for intact pictures to return before reconnecting, instead of the normal five seconds.
+
+Recovery is restricted to the observed unauthenticated Buddy3D H.264 profile (payload type 96, TCP channels 0/1). It is disabled by default for other cameras and does not affect snapshot mode. It does not lower the camera's frame rate or bitrate. See [the HD follow-up investigation](docs/buddy3d-hd-recovery.md) for evidence and validation limits.
+
+For the tested camera, SD (640×480, selected in the Prusa app) passed a six-minute direct transport test and a separate six-minute standard recording with no reconnects or long held-picture intervals. HD still produced truncated TCP blocks. SD is the best verified setting for the next full-print test; a complete moving print has not yet been verified in SD. Lowering output resolution in FFmpeg does not lower the source traffic.
+
+Buddy3D's SD stream compresses the wide image into 640×480 without a usable aspect-ratio hint. Set `"videoAspect": "16:9"` in its JSON config (`VIDEO_ASPECT=16:9` in an env config), or pass `--video-aspect 16:9`, to retain the correct display proportions. This sets display/pixel-aspect metadata without changing the stored resolution or source bitrate. It also works for HD, where the pixels remain square. Other cameras keep their source ratio unless explicitly overridden. The local Core One config has this override enabled.
+
 When a printer status endpoint is configured, video mode respects `--wait-for-printing`, `--wait-timeout`, `--status-interval`, and `--status-done`. By default it waits for PRINTING, then finishes the MP4 when a done state is observed. Initial IDLE does not count as a completed print; automatic stopping is armed only after PRINTING has been observed. Paused prints, missing status values, and failed status requests keep the recording running. The default polling interval is 30 seconds, so completion detection can take that long plus the request time. Without a status endpoint, stopping is manual. Reconnect messages begin with the local date and time, for example `2026-10-23 20:12:39 Video interrupted; reconnecting.`
 
 Video mode requires an interactive terminal and a continuous video stream (such as RTSP or HTTP video); a PrusaLink still-image endpoint cannot provide continuous video. Disable snapshot discovery with `--discover-camera false` when using a config that enables it. Timestamp overlays show the current local time. Audio is not recorded. Config files can also enable this mode with `"video": true` (JSON) or `VIDEO=true` (env).

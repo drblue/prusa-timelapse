@@ -18,6 +18,28 @@ const countFrames = (file: string) => {
 	return Number(result.stdout.trim());
 };
 
+test("keeps the selected display ratio through SD/HD encoding and MP4 assembly", { timeout: 15000 }, async () => {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), "prusa-aspect-test-"));
+	try {
+		for (const [size, sar] of [["640x480", "4:3"], ["1280x720", "1:1"]]) {
+			const folder = path.join(root, size); fs.mkdirSync(folder);
+			const input = path.join(folder, "input.mkv"), part = path.join(folder, "part.mkv"), output = path.join(folder, "recording.mp4");
+			ffmpeg(["-f", "lavfi", "-i", `testsrc2=size=${size}:rate=25`, "-t", "1", "-c:v", "libx264", input]);
+			const capture = spawnSync("ffmpeg", buildVideoArgs({ url: input, transport: "tcp", loglevel: "error", videoAspect: "16:9" }, part, "hflip"),
+				{ encoding: "utf8", stdio: ["ignore", "pipe", "pipe", "pipe"] });
+			assert.equal(capture.status, 0, capture.stderr);
+			await joinParts(folder, [{ file: "part.mkv", packets: 25 }], output);
+			const probe = spawnSync("ffprobe", ["-v", "error", "-show_entries", "stream=sample_aspect_ratio,display_aspect_ratio",
+				"-of", "json", output], { encoding: "utf8" });
+			assert.equal(probe.status, 0, probe.stderr);
+			const stream = JSON.parse(probe.stdout).streams[0];
+			assert.equal(stream.sample_aspect_ratio, sar); assert.equal(stream.display_aspect_ratio, "16:9");
+			assert.equal(countFrames(output), 25);
+		}
+		assert.throws(() => buildVideoArgs({ url: "test", transport: "tcp", loglevel: "warning", videoAspect: "0:9" }, "test.mkv"), /positive ratio/);
+	} finally { fs.rmSync(root, { recursive: true, force: true }); }
+});
+
 test("keeps reconnect and trailing outage time without dropping or re-encoding pictures", { timeout: 15000 }, async () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "prusa-timeline-test-"));
 	try {

@@ -5,20 +5,29 @@ import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
+import { createRepairProxy } from "./rtsp-repair.ts";
 
 export type VideoOptions = {
 	url: string;
 	transport: string;
 	loglevel: string;
 	captureHeader?: string | null;
+	repairRtsp?: boolean;
+	videoAspect?: string | null;
 };
 
 const videoLoglevel = (opts: VideoOptions) => ["quiet", "panic", "fatal"].includes(opts.loglevel) ? "warning" : opts.loglevel;
 
+export const validateVideoAspect = (ratio: string) => {
+	if (!/^\d+(?::|\/)\d+$/.test(ratio) || ratio.split(/[:/]/).some((v) => !Number.isFinite(Number(v)) || Number(v) <= 0)) {
+		throw new Error("--video-aspect must be a positive ratio such as 16:9");
+	}
+};
+
 const videoInputArgs = (opts: VideoOptions) => {
 	const args: string[] = [];
 	if (opts.captureHeader) args.push("-headers", `${opts.captureHeader.replace(/\r?\n$/, "")}\r\n`);
-	if (opts.url.startsWith("rtsp://")) args.push("-rtsp_transport", opts.transport, "-timeout", "5000000",
+	if (opts.url.startsWith("rtsp://")) args.push("-rtsp_transport", opts.transport, "-timeout", opts.repairRtsp ? "15000000" : "5000000",
 		"-allowed_media_types", "video", "-analyzeduration", "1000000", "-probesize", "1M");
 	else if (/^https?:\/\//.test(opts.url)) args.push("-rw_timeout", "5000000");
 	args.push("-i", opts.url);
@@ -37,8 +46,16 @@ export const buildVideoSourceArgs = (opts: VideoOptions) => [
 export const buildVideoArgs = (opts: VideoOptions, outFile: string, filter?: string | null) => {
 	const args = ["-hide_banner", "-nostats", "-loglevel", videoLoglevel(opts), "-xerror",
 		"-stats_period", "0.5", "-progress", "pipe:3",
-		"-err_detect", "explode", "-threads", "1", ...videoInputArgs(opts), "-map", "0:v:0", "-an"];
-	if (filter) args.push("-vf", filter);
+		"-err_detect", "explode", "-threads", "1"];
+	// MPEG-TS otherwise closes gaps over ten seconds as timestamp discontinuities.
+	if (opts.repairRtsp) args.push("-dts_delta_threshold", "3600");
+	args.push(...videoInputArgs(opts), "-map", "0:v:0", "-an");
+	const filters = [filter];
+	if (opts.videoAspect) {
+		validateVideoAspect(opts.videoAspect);
+		filters.push(`setdar=${opts.videoAspect.replace(":", "/")}`);
+	}
+	if (filters.some(Boolean)) args.push("-vf", filters.filter(Boolean).join(","));
 	args.push("-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-crf", "23",
 		"-pix_fmt", "yuv420p", "-fps_mode", "vfr", "-g", "25", "-bf", "0",
 		"-f", "matroska", "-cluster_time_limit", "1000", "-n", outFile);
@@ -93,6 +110,7 @@ export const captureVideo = async (
 	filter: string | null | undefined,
 	signal: AbortSignal,
 ) => {
+	if (opts.videoAspect) validateVideoAspect(opts.videoAspect);
 	const outFile = path.join(runDir, "recording.mp4");
 	const partsDir = path.join(runDir, "recording-parts");
 	fs.mkdirSync(partsDir); // Never mix a previous recording into this run.
@@ -107,6 +125,11 @@ export const captureVideo = async (
 		return safe.replace(/(rtsps?|https?):\/\/[^\s]+/g, "[camera URL]");
 	};
 	const parts: VideoPart[] = [];
+	if (opts.repairRtsp && (!opts.url.startsWith("rtsp://") || opts.transport !== "tcp")) {
+		throw new Error("RTSP repair requires an rtsp:// H.264 stream over TCP");
+	}
+	const proxy = opts.repairRtsp ? await createRepairProxy(opts.url, log) : undefined;
+	const sourceOptions = proxy ? { ...opts, url: proxy.url } : opts;
 	let attempt = 0;
 	let failure: unknown;
 	let stoppedAt: number | undefined;
@@ -120,7 +143,7 @@ export const captureVideo = async (
 			log(`Connecting (attempt ${attempt}).`);
 			const result = await new Promise<{ code: number | null; reason: string; fatal: boolean; capturedAt?: number }>((resolve, reject) => {
 				const source = opts.url.startsWith("rtsp://")
-					? spawn("ffmpeg", buildVideoSourceArgs(opts), { stdio: ["pipe", "pipe", "pipe"] }) : null;
+					? spawn("ffmpeg", buildVideoSourceArgs(sourceOptions), { stdio: ["pipe", "pipe", "pipe"] }) : null;
 				const input = source ? { ...opts, url: "pipe:0", captureHeader: null } : opts;
 				const child = spawn("ffmpeg", buildVideoArgs(input, file, filter), { stdio: ["pipe", "ignore", "pipe", "pipe"] });
 				let capturedAt: number | undefined;
@@ -163,7 +186,7 @@ export const captureVideo = async (
 				if (signal.aborted) onAbort();
 				const watchdog = setInterval(() => {
 					// Allow probing and the first keyframe longer than an established stream.
-					if (Date.now() - lastFrameAt > (frames ? 5000 : 15000)) finish("No complete frames received; reconnecting");
+					if (Date.now() - lastFrameAt > (frames && !opts.repairRtsp ? 5000 : 15000)) finish("No complete frames received; reconnecting");
 				}, 500);
 				const cleanup = () => {
 					clearInterval(watchdog);
@@ -239,6 +262,7 @@ export const captureVideo = async (
 	} catch (err) {
 		failure = err;
 	} finally {
+		proxy?.close();
 		signal.removeEventListener("abort", markStopped);
 		if (parts.length) {
 			console.log("Finishing video; please wait...");
@@ -279,6 +303,7 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 	process.on("SIGINT", stop);
 	process.on("SIGTERM", stop);
 	console.log(`Recording continuous video to: ${path.join(runDir, "recording.mp4")}`);
+	if (opts.repairRtsp) console.log("Buddy3D TCP packet recovery enabled; using one camera connection.");
 	console.log('Press "s", then "y" to stop. Any other key cancels. Ctrl+C also finishes the video.');
 	let monitoring: Promise<void> | undefined;
 	try {
