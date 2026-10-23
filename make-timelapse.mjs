@@ -15,6 +15,38 @@ const ask = async (q) => {
 	return String(a).trim();
 };
 
+const askKey = async (question, choices, defaultChoice) => {
+	if (!process.stdin.isTTY) {
+		for (;;) {
+			const answer = (await ask(question)).toLowerCase() || defaultChoice;
+			if (choices.includes(answer)) return answer;
+		}
+	}
+
+	readline.emitKeypressEvents(process.stdin);
+	const wasRaw = process.stdin.isRaw;
+	const wasPaused = process.stdin.isPaused();
+	process.stdout.write(question);
+	process.stdin.setRawMode(true);
+	process.stdin.resume();
+	return new Promise((resolve) => {
+		const onKey = (text, key) => {
+			const interrupted = key?.ctrl && key.name === "c";
+			const answer = ["return", "enter"].includes(key?.name)
+				? defaultChoice
+				: (text ?? "").toLowerCase();
+			if (!interrupted && !choices.includes(answer)) return;
+			process.stdin.removeListener("keypress", onKey);
+			process.stdin.setRawMode(wasRaw);
+			if (wasPaused) process.stdin.pause();
+			process.stdout.write(`${interrupted ? "^C" : answer}\n`);
+			if (interrupted) process.exit(130);
+			resolve(answer);
+		};
+		process.stdin.on("keypress", onKey);
+	});
+};
+
 const parseArgs = () => {
 	const args = process.argv.slice(2);
 	const out = {
@@ -289,14 +321,15 @@ const resolveOutputPath = async (filePath) => {
 	if (!fs.existsSync(filePath)) return filePath;
 
 	for (;;) {
-		const a = (await ask(
+		const a = await askKey(
 			`\nFile already exists:\n${filePath}\n` +
-			"[o] overwrite  [n] create new (auto-suffix)  [q] cancel: "
-		)).toLowerCase();
+			"[o] overwrite  [C] create new (auto-suffix, default)  [q] cancel: ",
+			["o", "c", "q"], "c"
+		);
 
 		if (a === "o") return filePath;
 		if (a === "q") process.exit(0);
-		if (a === "n") {
+		if (a === "c") {
 			const { dir, name, ext } = path.parse(filePath);
 			let i = 2;
 			let next;
