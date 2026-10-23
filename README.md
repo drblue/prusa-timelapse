@@ -50,12 +50,14 @@ Usable parts are saved in `recording-parts/` and joined into `recording.mp4` wit
 
 This prevents detected decoding failures from being deliberately concealed and recorded as blocky frames. It cannot recover missing camera data or detect every visual defect already encoded by the camera. Persistent errors require investigating the source stream, camera connection, or camera firmware.
 
-Video mode starts immediately and ignores printer status waiting and automatic stopping. It requires an interactive terminal and a continuous video stream (such as RTSP or HTTP video); a PrusaLink still-image endpoint cannot provide continuous video. Disable snapshot discovery with `--discover-camera false` when using a config that enables it. Timestamp overlays show the current local time. Audio is not recorded. Config files can also enable this mode with `"video": true` (JSON) or `VIDEO=true` (env).
+When a printer status endpoint is configured, video mode respects `--wait-for-printing`, `--wait-timeout`, `--status-interval`, and `--status-done`. By default it waits for PRINTING, then finishes the MP4 when a done state is observed. Initial IDLE does not count as a completed print; automatic stopping is armed only after PRINTING has been observed. Paused prints, missing status values, and failed status requests keep the recording running. The default polling interval is 30 seconds, so completion detection can take that long plus the request time. Without a status endpoint, stopping is manual. Reconnect messages begin with the local date and time, for example `2026-10-23 20:12:39 Video interrupted; reconnecting.`
+
+Video mode requires an interactive terminal and a continuous video stream (such as RTSP or HTTP video); a PrusaLink still-image endpoint cannot provide continuous video. Disable snapshot discovery with `--discover-camera false` when using a config that enables it. Timestamp overlays show the current local time. Audio is not recorded. Config files can also enable this mode with `"video": true` (JSON) or `VIDEO=true` (env).
 
 ### Capture options
 
 ```
---video       Record continuous MP4 video until manually stopped
+--video       Record MP4 video; stop on printer completion when status is configured
 --config      Path(s) to config files (repeat or comma-separated)
 --url         Input URL (rtsp://... or http(s)://...) (default: rtsp://192.168.1.186/live)
 --dir         Base output folder (default: ./snapshots)

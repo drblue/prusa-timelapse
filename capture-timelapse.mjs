@@ -366,7 +366,7 @@ Usage:
 	node capture-timelapse.mjs [options]
 
 Options:
-	--video       Record continuous MP4 video until manually stopped (requires a video stream)
+	--video       Record MP4; stop on printer completion when status is configured
 	--config      Path(s) to config files (repeat or comma-separated)
 	              (positional config paths are also accepted)
 	--url         Input URL (rtsp://... or http(s)://...) (default: rtsp://192.168.1.186/live)
@@ -745,9 +745,9 @@ const buildDrawTextFilter = (opts) => {
 	};
 };
 
-const fetchStatusData = async (opts) => {
+const fetchStatusData = async (opts, signal) => {
 	const headers = buildStatusHeaders(opts);
-	const res = await axios.get(opts.statusUrl, { headers, timeout: 10000 });
+	const res = await axios.get(opts.statusUrl, { headers, timeout: 10000, signal });
 	return res.data;
 };
 
@@ -811,7 +811,14 @@ const run = async () => {
 	const runDir = path.join(opts.baseDir, formatRunStamp());
 	fs.mkdirSync(runDir, { recursive: true });
 	if (opts.video) {
-		await recordVideo(opts, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null);
+		const printer = opts.statusUrl ? {
+			readState: async (signal) => readPath(await fetchStatusData(opts, signal), opts.statusPath),
+			intervalMs: opts.statusInterval * 1000,
+			doneStates: opts.statusDone.split(","),
+			waitForPrinting: opts.waitForPrinting,
+			waitTimeoutMs: opts.waitTimeout * 1000,
+		} : undefined;
+		await recordVideo(opts, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null, printer);
 		return;
 	}
 

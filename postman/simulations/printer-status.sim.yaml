@@ -1,0 +1,5 @@
+simulation: printer-status
+routing: path
+mocks:
+  - routeKey: printer
+    path: ../mocks/printer-status/config.yaml

@@ -1,0 +1,10 @@
+version: 1
+name: PrusaLink printer status
+slug: printer-status
+protocol: http
+port: 4901
+interceptRequests: true
+scenarios:
+  - name: default
+    path: ./default.cjs
+    default: true

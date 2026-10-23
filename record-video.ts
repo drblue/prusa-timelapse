@@ -1,3 +1,5 @@
+import { formatVideoTimestamp, watchPrinterLifecycle } from "./video-printer-status.ts";
+import type { PrinterLifecycleOptions } from "./video-printer-status.ts";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -225,7 +227,7 @@ export const captureVideo = async (
 			log(`${result.reason} (exit ${result.code}); ${usable ? "saved complete frames" : "no video packets"}.`);
 			if (result.fatal) throw new Error(`Recording failed; see ${logFile}`);
 			if (signal.aborted) break;
-			console.log(`Video interrupted; reconnecting. Details: ${logFile}`);
+			console.log(`${formatVideoTimestamp()} Video interrupted; reconnecting. Details: ${logFile}`);
 			// Brief backoff prevents a tight retry loop; stopping also cancels this wait.
 			await new Promise<void>((resolve) => {
 				const onAbort = () => { clearTimeout(timer); resolve(); };
@@ -249,7 +251,7 @@ export const captureVideo = async (
 	if (!parts.length) throw new Error(`No complete video frames captured; see ${logFile}`);
 };
 
-export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: string | null) => {
+export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: string | null, printer?: PrinterLifecycleOptions) => {
 	const controller = new AbortController();
 	const wasRaw = process.stdin.isRaw;
 	let confirming = false;
@@ -278,9 +280,27 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 	process.on("SIGTERM", stop);
 	console.log(`Recording continuous video to: ${path.join(runDir, "recording.mp4")}`);
 	console.log('Press "s", then "y" to stop. Any other key cancels. Ctrl+C also finishes the video.');
+	let monitoring: Promise<void> | undefined;
 	try {
-		await captureVideo(opts, runDir, filter, controller.signal);
+		if (printer) {
+			if (printer.waitForPrinting) console.log("Waiting for printer status to switch to PRINTING...");
+			const ready = new Promise<boolean>((resolve) => {
+				monitoring = watchPrinterLifecycle(printer, controller.signal, resolve, (state) => {
+					console.log(`${formatVideoTimestamp()} Printer status "${state}" detected. Finishing video...`);
+					stop();
+				}, (state) => {
+					console.log(`${formatVideoTimestamp()} Printer status: ${state ?? "(missing)"}`);
+				}, (error) => {
+					console.error(`${formatVideoTimestamp()} Printer status check failed: ${error instanceof Error ? error.message : String(error)}`);
+				});
+			});
+			if (await ready && !controller.signal.aborted) await captureVideo(opts, runDir, filter, controller.signal);
+		} else {
+			await captureVideo(opts, runDir, filter, controller.signal);
+		}
 	} finally {
+		controller.abort();
+		await monitoring;
 		process.stdin.removeListener("keypress", onKeypress);
 		process.stdin.setRawMode(Boolean(wasRaw));
 		process.stdin.pause();
