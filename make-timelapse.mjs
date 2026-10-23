@@ -367,6 +367,7 @@ const run = async () => {
 				frames: countFrames(dir, prefix, ext),
 				baseName,
 				displayName: parsed?.timeOnly ?? baseName,
+				jobDisplayName: meta.job?.display_name ?? meta.job?.file?.display_name,
 				dateKey: parsed?.dateKey ?? "Other",
 				timestamp: parsed?.timestamp ?? null,
 			};
@@ -415,6 +416,7 @@ const run = async () => {
 			const nameColor = it.timestamp ? kleur.white : kleur.gray;
 			console.log(
 				`${kleur.magenta(String(i + 1).padStart(2) + ".")} ${nameColor(`🕒 ${it.displayName}`)} ` +
+				(it.jobDisplayName ? `${kleur.cyan(it.jobDisplayName)} ` : "") +
 				`${kleur.dim(`(${it.frames} frames, ${it.intervalSeconds}s interval)`)}`
 			);
 		});
