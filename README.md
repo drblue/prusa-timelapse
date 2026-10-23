@@ -30,9 +30,22 @@ node capture-timelapse.mjs
 
 Each run creates a timestamped folder under `snapshots/` with images and `_timelapse_meta.json`.
 
+### Record continuous video
+
+```bash
+npm run capture-coreone -- --video
+# Or select a stream explicitly:
+npm run capture -- --config configs/coreone.json --video --url rtsp://192.168.1.186/live
+```
+
+Records `recording.mp4` in a timestamped folder under `snapshots/`. Press `s`, then `y` to confirm stopping; any other key cancels the stop request while recording continues. Wait for the saved-file message before closing the terminal. Ctrl+C also finishes the video gracefully.
+
+Video mode starts immediately and ignores printer status waiting and automatic stopping. It requires an interactive terminal and a continuous video stream (such as RTSP or HTTP video); a PrusaLink still-image endpoint cannot provide continuous video. Disable snapshot discovery with `--discover-camera false` when using a config that enables it. Timestamp overlays show the current local time. Audio is not recorded. Config files can also enable this mode with `"video": true` (JSON) or `VIDEO=true` (env).
+
 ### Capture options
 
 ```
+--video       Record continuous MP4 video until manually stopped
 --config      Path(s) to config files (repeat or comma-separated)
 --url         Input URL (rtsp://... or http(s)://...) (default: rtsp://192.168.1.186/live)
 --dir         Base output folder (default: ./snapshots)

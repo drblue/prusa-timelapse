@@ -6,6 +6,7 @@ import process from "node:process";
 import axios from "axios";
 import dotenv from "dotenv";
 import readline from "node:readline";
+import { recordVideo } from "./record-video.mjs";
 
 const pad = (n, len = 2) => String(n).padStart(len, "0");
 const padIndex = (n, len = 6) => String(n).padStart(len, "0");
@@ -196,6 +197,7 @@ const applyConfigToOpts = (opts, config) => {
 		setNumber("quality", data.quality);
 
 		setBool("timestamp", data.timestamp);
+		setBool("video", data.video);
 		setIfDefined("font", data.font);
 		setNumber("fontsize", data.fontsize);
 		setNumber("padding", data.padding);
@@ -232,6 +234,7 @@ const applyConfigToOpts = (opts, config) => {
 		setNumber("quality", data.QUALITY);
 
 		setBool("timestamp", data.TIMESTAMP);
+		setBool("video", data.VIDEO);
 		setIfDefined("font", data.FONT);
 		setNumber("fontsize", data.FONTSIZE);
 		setNumber("padding", data.PADDING);
@@ -269,6 +272,7 @@ const parseArgs = async () => {
 		url: env.RTSP_URL || "rtsp://192.168.1.186/live",
 		baseDir: path.resolve(process.cwd(), "snapshots"),
 		interval: 10,
+		video: false,
 		intervalLocked: false,
 		prefix: "frame_",
 		ext: "jpg",
@@ -316,6 +320,7 @@ const parseArgs = async () => {
 			i++;
 		}
 
+		else if (a === "--video") overrides.video = true;
 		else if (a === "--url") overrides.url = v, i++;
 		else if (a === "--dir") overrides.baseDir = path.resolve(v), i++;
 		else if (a === "--interval") overrides.interval = Number(v), overrides.intervalLocked = true, i++;
@@ -361,6 +366,7 @@ Usage:
 	node capture-timelapse.mjs [options]
 
 Options:
+	--video       Record continuous MP4 video until manually stopped (requires a video stream)
 	--config      Path(s) to config files (repeat or comma-separated)
 	              (positional config paths are also accepted)
 	--url         Input URL (rtsp://... or http(s)://...) (default: rtsp://192.168.1.186/live)
@@ -719,7 +725,9 @@ const buildDrawTextFilter = (opts) => {
 	const fontExists = opts.font && fs.existsSync(opts.font);
 	const fontPart = fontExists ? `fontfile=${opts.font}:` : "";
 
-	const stamp = escapeForDrawText(formatLocalTimestamp());
+	const stamp = opts.video
+		? "%{localtime}"
+		: escapeForDrawText(formatLocalTimestamp());
 
 	return {
 		filter:
@@ -758,6 +766,12 @@ const fetchJobData = async (opts) => {
 
 const run = async () => {
 	const opts = await parseArgs();
+	if (opts.video && !process.stdin.isTTY) {
+		throw new Error("--video requires an interactive terminal for stop confirmation.");
+	}
+	if (opts.video && opts.discoverCamera) {
+		throw new Error("--video requires a video stream URL; disable snapshot discovery with --discover-camera false and pass --url.");
+	}
 
 	if (opts.discoverCamera) {
 		try {
@@ -795,6 +809,10 @@ const run = async () => {
 
 	const runDir = path.join(opts.baseDir, formatRunStamp());
 	fs.mkdirSync(runDir, { recursive: true });
+	if (opts.video) {
+		await recordVideo(opts, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null);
+		return;
+	}
 
 	let statusSnapshot = null;
 	if (opts.statusUrl) {
