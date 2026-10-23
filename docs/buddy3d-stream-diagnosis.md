@@ -6,6 +6,10 @@ The 1920×1080 stream was damaged before video encoding in this project. A separ
 
 After the user changed the camera to HD, the source was verified as 1280×720. A minute-long direct TCP capture had no packet-sequence gaps, truncated blocks, or incomplete fragment assemblies. A subsequent continuous recording passed 120 seconds with strict decoding, no reconnects, and no clipped intervals. This demonstrates a working lower-load configuration in the tested windows; it does not establish the camera's internal failure mechanism or prove full-print reliability.
 
+**Full-print follow-up:** the subsequent HD recording did fail intermittently: 204 connection attempts and 190 long held-picture intervals totaling about 33.5 minutes. Its final MP4 decoded without errors, but continuous motion was not preserved. See the [full review](hd-print-review-20261023.md), including RTSP sequence warnings and reception timeouts in `recording.log`.
+
+**Further investigation:** a new direct-socket HD capture also reproduced a truncated TCP block without FFmpeg. An opt-in receiver recovery mode now resynchronizes and waits for a complete IDR on the existing session. See [the HD recovery investigation](buddy3d-hd-recovery.md) for transport measurements, source-load limits, and validation.
+
 ## Observations
 
 The user reports camera firmware **3.1.6**. VLC was open during the original blocky recording, but all live viewers were closed throughout the diagnostic session. The single-consumer diagnostic failures therefore cannot be explained solely by concurrent VLC playback. A local process/connection check also found no active VLC process or existing RTSP connection to the camera before the follow-up test.
@@ -58,11 +62,11 @@ The automated tests cover a stream joined mid-GOP, strict recovery from damaged 
 
 1. Completed: user reports firmware 3.1.6 and confirms no other live viewer during diagnosis. Keep this single-consumer condition for subsequent comparisons.
 2. Completed: the user selected HD and the actual 720p stream passed the short TCP/recording tests. Scaling the received image in FFmpeg would not reduce source traffic.
-3. Record a full print with HD and one viewer, then inspect its diagnostics and frame/timestamp continuity. The sampled test pictures show a stationary scene; a full print was not tested.
+3. Completed: the full HD print recording was reviewed. It still suffers intermittent H.264 errors and reconnections; see the follow-up report linked above.
 4. If failures recur, compare radio conditions or camera placement separately before considering AP configuration changes.
 5. For a Full HD investigation, provide Prusa support with the truncation example and firmware/hardware versions. No message has been sent externally.
 
-A short continuous HD recording is verified. Long-running recording under actual print motion is still unverified.
+A short continuous HD recording is verified. The later full-print run demonstrates that HD alone is insufficient for reliable long-running recording.
 
 ## Coverage and limitations
 

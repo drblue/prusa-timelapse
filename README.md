@@ -186,3 +186,5 @@ The script prompts you to select a capture folder and choose speed, FPS, and qua
 ## Tests
 
 Run `npm test` with FFmpeg and ffprobe installed. The video tests verify joining mid-GOP at a complete keyframe, recovery from damaged H.264, preservation of gap/trailing-outage time, and stopping during a reconnect.
+
+Printer lifecycle integration tests use a local HTTP simulation. See [postman/README.md](postman/README.md) for setup and commands. The full-print HD review is documented in [docs/hd-print-review-20261023.md](docs/hd-print-review-20261023.md).
