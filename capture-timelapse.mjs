@@ -6,7 +6,7 @@ import process from "node:process";
 import axios from "axios";
 import dotenv from "dotenv";
 import readline from "node:readline";
-import { recordVideo } from "./record-video.mjs";
+import { recordVideo } from "./record-video.ts";
 
 const pad = (n, len = 2) => String(n).padStart(len, "0");
 const padIndex = (n, len = 6) => String(n).padStart(len, "0");
@@ -385,6 +385,7 @@ Timestamp overlay:
 Noise/robustness:
 	--ignoreDecodeErrors true|false (default: true)
 	--loglevel    ffmpeg loglevel (default: fatal)
+	Video mode always uses strict decoding, reconnects on errors, and logs at warning level or higher.
 
 PrusaLink (local API):
 	--prusalink-ip   Printer IP address (or set PRUSALINK_IP in .env)

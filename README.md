@@ -12,6 +12,8 @@ npm install
 
 2) Ensure `ffmpeg` is available in your PATH.
 
+Use Node.js 22.18+ (or 24+) for the TypeScript video recorder. Video mode also requires `ffprobe`, included with FFmpeg.
+
 3) Create a `.env` file (or edit the existing one):
 
 ```env
@@ -39,6 +41,14 @@ npm run capture -- --config configs/coreone.json --video --url rtsp://192.168.1.
 ```
 
 Records `recording.mp4` in a timestamped folder under `snapshots/`. Press `s`, then `y` to confirm stopping; any other key cancels the stop request while recording continues. Wait for the saved-file message before closing the terminal. Ctrl+C also finishes the video gracefully.
+
+Video mode uses strict decoding and automatically reconnects after a decoding error. It also reconnects if no new encoded frames arrive for five seconds (15 seconds are allowed for initial probing and the first keyframe). Each connection starts with fresh decoder references; recording resumes when a decodable keyframe arrives. TCP remains the default RTSP transport.
+
+RTSP input is first remuxed, without re-encoding, from a complete keyframe into MPEG-TS. Strict decoding then uses the current in-band video parameters. This handles the Buddy3D camera advertising stale Full HD parameters after switching to HD. Source probing may log startup warnings; these initial incomplete pictures are excluded from the recorded video. Only one connection is opened to the camera.
+
+Usable parts are saved in `recording-parts/` and joined into `recording.mp4` without another quality loss when capture stops. For RTSP, the timeline begins at the first received keyframe. Reconnection gaps and a trailing outage retain their elapsed time by holding the last intact picture; missing motion cannot be recovered. Reception times determine the offsets, with buffering and camera timestamp drift limiting their precision. Other input types retain the previous part-joining behavior. If assembly fails, the parts remain available. Diagnostics and reconnection events are saved in `recording.log`, with the camera URL and capture header value redacted. Video mode ignores `ignoreDecodeErrors` and raises quiet/fatal log levels to `warning` so errors can be diagnosed. Snapshot capture keeps its existing settings.
+
+This prevents detected decoding failures from being deliberately concealed and recorded as blocky frames. It cannot recover missing camera data or detect every visual defect already encoded by the camera. Persistent errors require investigating the source stream, camera connection, or camera firmware.
 
 Video mode starts immediately and ignores printer status waiting and automatic stopping. It requires an interactive terminal and a continuous video stream (such as RTSP or HTTP video); a PrusaLink still-image endpoint cannot provide continuous video. Disable snapshot discovery with `--discover-camera false` when using a config that enables it. Timestamp overlays show the current local time. Audio is not recorded. Config files can also enable this mode with `"video": true` (JSON) or `VIDEO=true` (env).
 
@@ -154,4 +164,9 @@ The script prompts you to select a capture folder and choose speed, FPS, and qua
 ## Tips
 
 - Press `s` during capture to stop (with confirmation).
-- Use `--transport udp` if your RTSP stream is flaky over TCP.
+- Prefer TCP for RTSP video. UDP can lose packets and should only be used if a comparison with the specific camera shows better results.
+- For the tested Buddy3D camera running firmware 3.1.6, HD (1280×720) passed the short continuous-recording tests; Full HD produced truncated packets. See [the measured results and limitations](docs/buddy3d-stream-diagnosis.md). Set the mode in the camera itself; scaling in FFmpeg does not reduce camera traffic.
+
+## Tests
+
+Run `npm test` with FFmpeg and ffprobe installed. The video tests verify joining mid-GOP at a complete keyframe, recovery from damaged H.264, preservation of gap/trailing-outage time, and stopping during a reconnect.
