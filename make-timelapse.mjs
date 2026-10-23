@@ -167,23 +167,50 @@ const formatTelemetry = (statusData) => {
 	return lines.join("\n");
 };
 
-const findStartNumber = (dir, prefix, ext) => {
+const listFrameNumbers = (dir, prefix, ext) => {
 	let entries;
 	try {
 		entries = fs.readdirSync(dir);
 	} catch {
-		return null;
+		return [];
 	}
 	const re = new RegExp(`^${escapeRegex(prefix)}(\\d+)${escapeRegex(ext)}$`);
-	let min = null;
+	const numbers = [];
 	for (const name of entries) {
 		const match = re.exec(name);
 		if (!match) continue;
 		const n = Number(match[1]);
 		if (!Number.isInteger(n)) continue;
-		if (min === null || n < min) min = n;
+		numbers.push(n);
 	}
-	return min;
+	return numbers.sort((a, b) => a - b);
+};
+
+const chooseStartNumber = async (chosen, frameNumbers) => {
+	const firstNumber = frameNumbers[0];
+	const statuses = frameNumbers.map((number) => readStatusFile(chosen.dir, chosen.prefix, number));
+	// Missing or unreadable status files do not establish that time_remaining was unset.
+	const requireProgress = statuses.some((status) => status !== null && status.job?.time_remaining == null);
+	for (let index = 0; index < frameNumbers.length; index++) {
+		const number = frameNumbers[index];
+		const status = statuses[index];
+		if (status?.job?.time_remaining == null) continue;
+		if (requireProgress && !(status.job.progress > 0)) continue;
+
+		const elapsed = Math.round((number - firstNumber) * chosen.intervalSeconds);
+		const startNumber = frameNumbers[Math.max(0, index - 10)];
+		const frameLabel = (n) => String(n);
+		console.log(`\nPrint detected starting at frame ${frameLabel(number)} (after ${Math.floor(elapsed / 60)} min ${elapsed % 60} sec).`);
+		for (;;) {
+			const answer = (await ask(
+				`Start at frame ${frameLabel(startNumber)} instead of frame ${frameLabel(firstNumber)}? [Y/n] `
+			)).toLowerCase();
+			if (["", "y", "yes"].includes(answer)) return startNumber;
+			if (["n", "no"].includes(answer)) return firstNumber;
+			console.log("Please enter yes (Y) or no (N), or press Enter for yes.");
+		}
+	}
+	return firstNumber;
 };
 
 const parseFolderStamp = (name) => {
@@ -370,6 +397,11 @@ const run = async () => {
 		}
 	}
 
+	const frameNumbers = listFrameNumbers(chosen.dir, chosen.prefix, chosen.ext);
+	if (!frameNumbers.length) throw new Error("No frames found in the selected folder.");
+	const startNumber = await chooseStartNumber(chosen, frameNumbers);
+	const selectedFrames = frameNumbers.filter((number) => number >= startNumber);
+
 	const baseFps = opts.fps !== null
 		? (Number.isFinite(opts.fps) && opts.fps >= 1 && opts.fps <= 60 ? opts.fps : 30)
 		: (opts.folder ? 30 : await askIntDefault({ label: "FPS (<2x speed, max 60)", def: 30, min: 1, max: 60 }));
@@ -381,13 +413,12 @@ const run = async () => {
 	const speed = opts.speed !== null
 		? (SPEED_OPTIONS.includes(opts.speed) ? opts.speed : 1)
 		: (opts.folder ? 1 : await showSpeedMenuAndPick({
-				frames: chosen.frames,
+				frames: selectedFrames.length,
 				intervalSeconds: chosen.intervalSeconds,
 				baseFps,
 		  }));
 
 	const outFps = speed >= 2 ? 60 : baseFps;
-	const startNumber = findStartNumber(chosen.dir, chosen.prefix, chosen.ext);
 
 	const baseName = `timelapse-${path.basename(chosen.dir)}-${outFps}fps-${crf}crf-${speed}x.mp4`;
 	const desiredPath = opts.outFile ?? path.join(opts.baseDir, baseName);
@@ -396,8 +427,9 @@ const run = async () => {
 	const input = path.join(chosen.dir, opts.pattern);
 
 	// Check if status files exist to decide whether to show telemetry
-	const sampleStatusPath = path.join(chosen.dir, `${chosen.prefix}000001_status.json`);
-	const hasTelemetry = fs.existsSync(sampleStatusPath);
+	const hasTelemetry = selectedFrames.some((number) =>
+		fs.existsSync(path.join(chosen.dir, `${chosen.prefix}${String(number).padStart(6, "0")}_status.json`))
+	);
 
 	// Pre-process frames with telemetry overlay if available
 	let processedInput = input;
@@ -407,7 +439,7 @@ const run = async () => {
 		fs.mkdirSync(tempDir, { recursive: true });
 
 		// Process each frame with telemetry overlay
-		for (let i = 1; i <= chosen.frames; i++) {
+		for (const [frameIndex, i] of selectedFrames.entries()) {
 			const statusData = readStatusFile(chosen.dir, chosen.prefix, i);
 			const telemetryLines = formatTelemetry(statusData).split("\n");
 
@@ -440,8 +472,8 @@ const run = async () => {
 			const p = spawn("ffmpeg", ffmpegOverlayArgs, { stdio: "inherit" });
 			await new Promise((res, rej) => p.on("exit", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg overlay failed on frame ${i}`)))));
 
-			if (i % 50 === 0) {
-				console.log(`  Processed ${i}/${chosen.frames} frames...`);
+			if ((frameIndex + 1) % 50 === 0) {
+				console.log(`  Processed ${frameIndex + 1}/${selectedFrames.length} frames...`);
 			}
 		}
 
