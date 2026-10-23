@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -47,6 +47,18 @@ const escapeForDrawText = (s) =>
 		.replaceAll("\\", "\\\\")
 		.replaceAll(":", "\\:")
 		.replaceAll("'", "\\'");
+
+const ffmpegHasFilter = (name) => {
+	const res = spawnSync("ffmpeg", ["-hide_banner", "-filters"], { encoding: "utf8" });
+	if (res.error) throw res.error;
+	if (res.status !== 0) {
+		const err = res.stderr?.trim() || res.stdout?.trim() || `ffmpeg -filters exited with code ${res.status}`;
+		throw new Error(err);
+	}
+
+	const filterPattern = new RegExp(`^\\s*.{3}\\s+${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s`, "m");
+	return filterPattern.test(res.stdout || "");
+};
 
 const parseBoolean = (value) => {
 	if (typeof value === "boolean") return value;
@@ -120,7 +132,17 @@ const selectConfig = async (configPaths) => {
 	const resolved = configPaths.map((p) => path.resolve(process.cwd(), p));
 	const candidates = resolved.length > 0 ? resolved : listConfigCandidates();
 	if (candidates.length === 0) return null;
-	if (candidates.length === 1) return candidates[0];
+	if (candidates.length === 1) {
+		const candidate = candidates[0];
+		let label = path.basename(candidate);
+		try {
+			label = configDisplayName(candidate, parseConfigFile(candidate));
+		} catch (err) {
+			label = `${path.basename(candidate)} (unreadable)`;
+		}
+		console.log(`Only one config found; using ${label}`);
+		return candidate;
+	}
 
 	if (!process.stdin.isTTY) {
 		throw new Error("Multiple configs available; rerun in a TTY or pass --config <path>.");
@@ -756,6 +778,19 @@ const run = async () => {
 
 	if (!Number.isFinite(opts.interval) || opts.interval <= 0) {
 		throw new Error("--interval must be > 0");
+	}
+
+	if (opts.timestamp) {
+		try {
+			if (!ffmpegHasFilter("drawtext")) {
+				console.log("⚠️  ffmpeg does not include the drawtext filter; disabling timestamp overlay.");
+				console.log("   Install an ffmpeg build with drawtext support, or pass --timestamp false to silence this warning.");
+				opts.timestamp = false;
+			}
+		} catch (err) {
+			console.log(`⚠️  Could not inspect ffmpeg filters: ${err?.message ?? err}`);
+			console.log("   Continuing with timestamp overlay enabled.");
+		}
 	}
 
 	const runDir = path.join(opts.baseDir, formatRunStamp());

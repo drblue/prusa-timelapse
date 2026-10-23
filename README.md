@@ -72,6 +72,7 @@ Each run creates a timestamped folder under `snapshots/` with images and `_timel
 Notes:
 - If `PRUSALINK_IP` and `PRUSALINK_API_KEY` are set, the script polls `http://<ip>/api/v1/status` automatically and stops on done status.
 - While printing, the status log includes progress percentage, elapsed time, remaining time, and ETA.
+- Timestamp overlays require ffmpeg's `drawtext` filter. If your ffmpeg build does not include it, capture continues with the overlay disabled.
 - For PrusaLink webcam snapshots, set `--url` to the snapshot endpoint and pass `--capture-header "X-Api-Key: <key>"`.
 - When `--discover-camera` is enabled, the capture URL is pulled from PrusaLink and the snapshot interval is updated from the camera's configured interval (unless `--interval` is provided).
 
