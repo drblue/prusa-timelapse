@@ -233,6 +233,7 @@ const chooseStartNumber = async (chosen, frameNumbers) => {
 		const startNumber = frameNumbers[Math.max(0, index - 10)];
 		const frameLabel = (n) => String(n);
 		console.log(`\nPrint detected starting at frame ${frameLabel(number)} (after ${Math.floor(elapsed / 60)} min ${elapsed % 60} sec).`);
+		if (startNumber === firstNumber) return firstNumber;
 		for (;;) {
 			const answer = (await ask(
 				`Start at frame ${frameLabel(startNumber)} instead of frame ${frameLabel(firstNumber)}? [Y/n] `
