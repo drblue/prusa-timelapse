@@ -81,6 +81,7 @@ test("starts strict decoding at a complete keyframe when joining mid-GOP", { tim
 		const source = spawn("ffmpeg", buildVideoSourceArgs(opts), { stdio: ["ignore", "pipe", "ignore"] });
 		const decoder = spawn("ffmpeg", buildVideoArgs({ ...opts, url: "pipe:0" }, output),
 			{ stdio: ["pipe", "ignore", "pipe", "pipe"] });
+		assert.ok(decoder.stdin && decoder.stderr);
 		decoder.stdio[3]!.on("data", () => {});
 		source.stdout.pipe(decoder.stdin);
 		decoder.stdin.on("error", () => {});
