@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { captureLog } from "./capture-log.ts";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -141,7 +142,7 @@ const selectConfig = async (configPaths) => {
 		} catch (err) {
 			label = `${path.basename(candidate)} (unreadable)`;
 		}
-		console.log(`Only one config found; using ${label}`);
+		captureLog.message(`Only one config found; using ${label}`);
 		return candidate;
 	}
 
@@ -158,9 +159,9 @@ const selectConfig = async (configPaths) => {
 		}
 	});
 
-	console.log("Available configs:");
+	captureLog.message("Available configs:");
 	for (let i = 0; i < parsed.length; i++) {
-		console.log(`  ${i + 1}) ${parsed[i].label}`);
+		captureLog.message(`  ${i + 1}) ${parsed[i].label}`);
 	}
 
 	const chosen = await promptForConfig(parsed.map((entry) => entry.path));
@@ -369,7 +370,7 @@ const parseArgs = async () => {
 		}
 
 		else if (a === "-h" || a === "--help") {
-			console.log(`
+			captureLog.message(`
 Usage:
 	node capture-timelapse.mjs [options]
 
@@ -668,9 +669,9 @@ const selectCamera = async (opts, cameras) => {
 	if (cameras.length === 1) return cameras[0];
 	if (!process.stdin.isTTY) return cameras[0];
 
-	console.log("Available cameras:");
+	captureLog.message("Available cameras:");
 	for (let i = 0; i < cameras.length; i++) {
-		console.log(`  ${i + 1}) ${cameraDisplayName(cameras[i], i)}`);
+		captureLog.message(`  ${i + 1}) ${cameraDisplayName(cameras[i], i)}`);
 	}
 	const chosen = await promptForCamera(cameras);
 	if (!chosen) throw new Error("No camera selected.");
@@ -689,9 +690,9 @@ const discoverPrusaLinkCamera = async (opts) => {
 	});
 	const cameras = normalizeCameraList(res.data);
 	if (cameras.length === 0) {
-		console.log("⚠️  No cameras found on PrusaLink");
-		console.log("Queried URL:", `${baseUrl}/api/v1/cameras`);
-		console.log("Response data:", JSON.stringify(res.data, null, 2));
+		captureLog.warn("⚠️  No cameras found on PrusaLink");
+		captureLog.message("Queried URL:", `${baseUrl}/api/v1/cameras`);
+		captureLog.debug("Response data:", JSON.stringify(res.data, null, 2));
 		throw new Error("No cameras returned from PrusaLink")
 	};
 
@@ -771,7 +772,7 @@ const fetchJobData = async (opts) => {
 		const res = await axios.get(`${baseUrl}/api/v1/job`, { headers, timeout: 10000 });
 		return res.data;
 	} catch (err) {
-		console.error(`⚠️  job fetch failed: ${err?.message ?? "(no error message)"}`);
+		captureLog.warn(`⚠️  job fetch failed: ${err?.message ?? "(no error message)"}`);
 		return null;
 	}
 };
@@ -794,10 +795,10 @@ const run = async () => {
 					opts.cameraInfo.id != null ? `id: ${opts.cameraInfo.id}` : null,
 					opts.cameraInfo.interval != null ? `interval: ${opts.cameraInfo.interval}s` : null,
 				].filter(Boolean);
-				console.log(`📷 PrusaLink camera selected (${details.join(", ")})`);
+				captureLog.info(`📷 PrusaLink camera selected (${details.join(", ")})`);
 			}
 		} catch (err) {
-			console.error(`❌ camera discovery failed: ${err?.message ?? err}`);
+			captureLog.error(`❌ camera discovery failed: ${err?.message ?? err}`);
 			process.exit(1);
 		}
 	}
@@ -809,13 +810,13 @@ const run = async () => {
 	if (opts.timestamp) {
 		try {
 			if (!ffmpegHasFilter("drawtext")) {
-				console.log("⚠️  ffmpeg does not include the drawtext filter; disabling timestamp overlay.");
-				console.log("   Install an ffmpeg build with drawtext support, or pass --timestamp false to silence this warning.");
+				captureLog.warn("⚠️  ffmpeg does not include the drawtext filter; disabling timestamp overlay.");
+				captureLog.message("   Install an ffmpeg build with drawtext support, or pass --timestamp false to silence this warning.");
 				opts.timestamp = false;
 			}
 		} catch (err) {
-			console.log(`⚠️  Could not inspect ffmpeg filters: ${err?.message ?? err}`);
-			console.log("   Continuing with timestamp overlay enabled.");
+			captureLog.warn(`⚠️  Could not inspect ffmpeg filters: ${err?.message ?? err}`);
+			captureLog.message("   Continuing with timestamp overlay enabled.");
 		}
 	}
 
@@ -844,8 +845,8 @@ const run = async () => {
 				data: resData,
 			};
 		} catch (err) {
-			console.error(`⚠️  initial status fetch failed: ${err?.message ?? "(no error message)"}`);
-			console.error(err);
+			captureLog.warn(`⚠️  initial status fetch failed: ${err?.message ?? "(no error message)"}`);
+			captureLog.error(err);
 		}
 	}
 
@@ -928,8 +929,8 @@ const run = async () => {
 				const { filter, fontExists } = buildDrawTextFilter(opts);
 				if (!fontExists && !warnedFontMissing) {
 					warnedFontMissing = true;
-					console.log(`⚠️  Font not found at: ${opts.font}`);
-					console.log("   Continuing without explicit fontfile. If drawtext fails, pass --font /path/to/font.ttf");
+					captureLog.warn(`⚠️  Font not found at: ${opts.font}`);
+					captureLog.message("   Continuing without explicit fontfile. If drawtext fails, pass --font /path/to/font.ttf");
 				}
 				ffmpegArgs.push("-vf", filter);
 			}
@@ -955,7 +956,7 @@ const run = async () => {
 			const statusFile = path.join(runDir, statusFilename);
 			fs.writeFileSync(statusFile, JSON.stringify(statusData, null, 2) + "\n");
 		} catch (err) {
-			console.error(`⚠️  status capture failed: ${err?.message ?? "(no error message)"}`);
+			captureLog.warn(`⚠️  status capture failed: ${err?.message ?? "(no error message)"}`);
 		}
 	};
 
@@ -965,8 +966,8 @@ const run = async () => {
 		if (statusTimer) clearInterval(statusTimer);
 		if (process.stdin.isTTY) process.stdin.setRawMode(false);
 		process.stdin.pause();
-		console.log("Stopped.");
-		console.log(`Snapshots saved in: ${runDir}`);
+		captureLog.message("Stopped.");
+		captureLog.path("📂 Snapshots saved in:", runDir);
 		process.exit(0);
 	};
 
@@ -977,23 +978,24 @@ const run = async () => {
 		try {
 			await captureSnapshotStatus();
 			const outFile = await takeSnapshot();
-			// console.log(`✅ ${now.toLocaleTimeString()} 💾 ${path.basename(outFile)}`);
-			console.log(`✅ ${formatLocalTimestamp(new Date())} 💾 ${path.basename(outFile)}`);
+			// captureLog.message(`✅ ${now.toLocaleTimeString()} 💾 ${path.basename(outFile)}`);
+			captureLog.message(`✅ ${formatLocalTimestamp(new Date())} 💾 ${path.basename(outFile)}`);
 			index++;
 		} catch (err) {
-			console.error(`❌ snapshot failed: ${err?.message ?? err}`);
+			captureLog.error(`❌ snapshot failed: ${err?.message ?? err}`);
 		} finally {
 			capturing = false;
 			if (wantStop) stopNow();
 		}
 	};
 
-	console.log(`Capturing every ${opts.interval}s to: ${runDir}`);
-	console.log(`Timestamp overlay: ${opts.timestamp ? "on" : "off"}`);
-	console.log(`Press "s" to stop (with confirmation).`);
+	captureLog.path("📂 Capture folder:", runDir);
+	captureLog.info(`Capturing every ${opts.interval}s`);
+	captureLog.info(`Timestamp overlay: ${opts.timestamp ? "on" : "off"}`);
+	captureLog.message(`Press "s" to stop (with confirmation).`);
 
 	if (opts.statusUrl && opts.waitForPrinting) {
-		console.log("Waiting for printer status to switch to PRINTING...");
+		captureLog.info("Waiting for printer status to switch to PRINTING...");
 		const startedAt = Date.now();
 		for (;;) {
 			try {
@@ -1001,25 +1003,25 @@ const run = async () => {
 				const value = readPath(data, opts.statusPath);
 				const stamp = formatLocalTimestamp(new Date());
 				if (value === undefined) {
-					console.log(`🖨️  ${stamp} status: (missing at ${opts.statusPath})`);
+					captureLog.message(`🖨️  ${stamp} status: (missing at ${opts.statusPath})`);
 				} else {
-					console.log(`🖨️  ${stamp} status: ${String(value)}`);
+					captureLog.message(`🖨️  ${stamp} status: ${String(value)}`);
 				}
 				if (typeof value === "string" && value.toLowerCase() === "printing") {
 					// Capture job info when printing starts
 					const jobData = await fetchJobData(opts);
 					if (jobData) {
-						console.log(`📋 Job info captured: ${jobData.file?.display_name ?? jobData.file?.name ?? "unknown"}`);
+						captureLog.info(`📋 Job info captured: ${jobData.file?.display_name ?? jobData.file?.name ?? "unknown"}`);
 						jobInfoCaptured = true;
 						writeMetaFile(jobData);
 					}
 					break;
 				}
 			} catch (err) {
-				console.error(`❌ status check failed: ${err?.message ?? err}`);
+				captureLog.error(`❌ status check failed: ${err?.message ?? err}`);
 			}
 			if (opts.waitTimeout > 0 && Date.now() - startedAt >= opts.waitTimeout * 1000) {
-				console.log("Wait timeout reached. Starting capture...");
+				captureLog.message("Wait timeout reached. Starting capture...");
 				break;
 			}
 			await new Promise((r) => setTimeout(r, opts.statusInterval * 1000));
@@ -1042,14 +1044,14 @@ const run = async () => {
 				if (!jobInfoCaptured && typeof value === "string" && value.toLowerCase() === "printing") {
 					const jobData = await fetchJobData(opts);
 					if (jobData) {
-						console.log(`📋 Job info captured: ${jobData.file?.display_name ?? jobData.file?.name ?? "unknown"}`);
+						captureLog.info(`📋 Job info captured: ${jobData.file?.display_name ?? jobData.file?.name ?? "unknown"}`);
 						jobInfoCaptured = true;
 						writeMetaFile(jobData);
 					}
 				}
 
 				if (value === undefined) {
-					console.log(`🖨️  ${stamp} status: (missing at ${opts.statusPath})`);
+					captureLog.message(`🖨️  ${stamp} status: (missing at ${opts.statusPath})`);
 				} else {
 					let suffix = "";
 					if (typeof value === "string" && value.toLowerCase() === "printing") {
@@ -1066,20 +1068,20 @@ const run = async () => {
 							suffix += `${suffix ? " " : ""}(${progress.toFixed(2)}%)`;
 						}
 					}
-					console.log(`🖨️  ${stamp} status: ${String(value)}${suffix}`);
+					captureLog.message(`🖨️  ${stamp} status: ${String(value)}${suffix}`);
 				}
 				if (typeof value === "string" && doneSet.has(value.toLowerCase())) {
 					const finishedAt = formatLocalTimestamp(new Date()).slice(11, 16);
-					console.log(`Printer status "${value}" detected at ${finishedAt}. Stopping capture...`);
+					captureLog.info(`Printer status "${value}" detected at ${finishedAt}. Stopping capture...`);
 					wantStop = true;
 					if (!capturing) stopNow();
 				}
 			} catch (err) {
-				console.error(`❌ status check failed: ${err?.message ?? err}`);
+				captureLog.error(`❌ status check failed: ${err?.message ?? err}`);
 			}
 		};
 
-		console.log(`Status polling: ${opts.statusUrl} (${opts.statusInterval}s)`);
+		captureLog.info(`Status polling: ${opts.statusUrl} (${opts.statusInterval}s)`);
 		statusTimer = setInterval(checkStatus, opts.statusInterval * 1000);
 		await checkStatus();
 	}
@@ -1095,7 +1097,7 @@ const run = async () => {
 			if (!running) return;
 
 			if (key === "\u0003") {
-				console.log("\nCtrl+C");
+				captureLog.message("\nCtrl+C");
 				stopNow();
 				return;
 			}
@@ -1122,6 +1124,6 @@ const run = async () => {
 };
 
 run().catch((err) => {
-	console.error(err?.stack ?? err);
+	captureLog.error(err?.stack ?? err);
 	process.exit(1);
 });

@@ -1,10 +1,11 @@
-import { formatVideoTimestamp, watchPrinterLifecycle } from "./video-printer-status.ts";
-import type { PrinterLifecycleOptions } from "./video-printer-status.ts";
+import { captureLog } from "./capture-log.ts";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import readline from "node:readline";
+import { formatVideoTimestamp, watchPrinterLifecycle } from "./video-printer-status.ts";
+import type { PrinterLifecycleOptions } from "./video-printer-status.ts";
 import { createRepairProxy } from "./rtsp-repair.ts";
 
 export type VideoOptions = {
@@ -114,7 +115,8 @@ export const captureVideo = async (
 	const outFile = path.join(runDir, "recording.mp4");
 	const partsDir = path.join(runDir, "recording-parts");
 	fs.mkdirSync(partsDir); // Never mix a previous recording into this run.
-	const logFile = path.join(runDir, "recording.log");
+	const logFile = path.resolve(runDir, "recording.log");
+	captureLog.path("📝 Capture log:", logFile);
 	const log = (message: string) => fs.appendFileSync(logFile, `${new Date().toISOString()} ${message}\n`);
 	const redact = (message: string) => {
 		let safe = message.replaceAll(opts.url, "[camera URL]");
@@ -250,7 +252,8 @@ export const captureVideo = async (
 			log(`${result.reason} (exit ${result.code}); ${usable ? "saved complete frames" : "no video packets"}.`);
 			if (result.fatal) throw new Error(`Recording failed; see ${logFile}`);
 			if (signal.aborted) break;
-			console.log(`${formatVideoTimestamp()} Video interrupted; reconnecting. Details: ${logFile}`);
+			captureLog.warn(`${formatVideoTimestamp()} Video interrupted; reconnecting.`);
+			captureLog.path("📝 Capture log:", logFile);
 			// Brief backoff prevents a tight retry loop; stopping also cancels this wait.
 			await new Promise<void>((resolve) => {
 				const onAbort = () => { clearTimeout(timer); resolve(); };
@@ -265,10 +268,10 @@ export const captureVideo = async (
 		proxy?.close();
 		signal.removeEventListener("abort", markStopped);
 		if (parts.length) {
-			console.log("Finishing video; please wait...");
+			captureLog.info("Finishing video; please wait...");
 			await joinParts(partsDir, parts, outFile, stoppedAt ?? Date.now());
 			if (!failure) fs.rmSync(partsDir, { recursive: true });
-			console.log(`Video saved in: ${outFile}`);
+			captureLog.path("🎬 Video saved in:", outFile);
 		}
 	}
 	if (failure) throw failure;
@@ -281,7 +284,7 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 	let confirming = false;
 	const stop = () => {
 		if (controller.signal.aborted) return;
-		console.log("\nStopping video capture...");
+		captureLog.info("\nStopping video capture...");
 		controller.abort();
 	};
 	const onKeypress = (key: string, details: readline.Key) => {
@@ -290,7 +293,7 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 		if (confirming) {
 			confirming = false;
 			if (key?.toLowerCase() === "y") stop();
-			else console.log("\nContinuing recording.");
+			else captureLog.message("\nContinuing recording.");
 		} else if (key?.toLowerCase() === "s") {
 			confirming = true;
 			process.stdout.write("\nStop recording? (y/N) ");
@@ -302,21 +305,22 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 	process.stdin.resume();
 	process.on("SIGINT", stop);
 	process.on("SIGTERM", stop);
-	console.log(`Recording continuous video to: ${path.join(runDir, "recording.mp4")}`);
-	if (opts.repairRtsp) console.log("Buddy3D TCP packet recovery enabled; using one camera connection.");
-	console.log('Press "s", then "y" to stop. Any other key cancels. Ctrl+C also finishes the video.');
+	captureLog.path("📂 Capture folder:", runDir);
+	captureLog.path("🎬 Recording video to:", path.join(runDir, "recording.mp4"));
+	if (opts.repairRtsp) captureLog.info("Buddy3D TCP packet recovery enabled; using one camera connection.");
+	captureLog.message('Press "s", then "y" to stop. Any other key cancels. Ctrl+C also finishes the video.');
 	let monitoring: Promise<void> | undefined;
 	try {
 		if (printer) {
-			if (printer.waitForPrinting) console.log("Waiting for printer status to switch to PRINTING...");
+			if (printer.waitForPrinting) captureLog.info("Waiting for printer status to switch to PRINTING...");
 			const ready = new Promise<boolean>((resolve) => {
 				monitoring = watchPrinterLifecycle(printer, controller.signal, resolve, (state) => {
-					console.log(`${formatVideoTimestamp()} Printer status "${state}" detected. Finishing video...`);
+					captureLog.info(`${formatVideoTimestamp()} Printer status "${state}" detected. Finishing video...`);
 					stop();
 				}, (state) => {
-					console.log(`${formatVideoTimestamp()} Printer status: ${state ?? "(missing)"}`);
+					captureLog.message(`${formatVideoTimestamp()} Printer status: ${state ?? "(missing)"}`);
 				}, (error) => {
-					console.error(`${formatVideoTimestamp()} Printer status check failed: ${error instanceof Error ? error.message : String(error)}`);
+					captureLog.error(`${formatVideoTimestamp()} Printer status check failed: ${error instanceof Error ? error.message : String(error)}`);
 				});
 			});
 			if (await ready && !controller.signal.aborted) await captureVideo(opts, runDir, filter, controller.signal);
