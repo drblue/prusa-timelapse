@@ -875,6 +875,8 @@ const run = async () => {
 	let capturing = false;
 	let wantStop = false;
 	let warnedFontMissing = false;
+	let timer = null;
+	let snapshotProcess = null;
 	let statusTimer = null;
 	let jobInfoCaptured = false;
 
@@ -931,7 +933,9 @@ const run = async () => {
 
 			ffmpegArgs.push("-y", outFile);
 
-			const p = spawn("ffmpeg", ffmpegArgs, { stdio: "inherit" });
+			const p = spawn("ffmpeg", ffmpegArgs, { stdio: ["ignore", "inherit", "inherit"] });
+			snapshotProcess = p;
+			p.once("close", () => { snapshotProcess = null; });
 			p.on("error", reject);
 			p.on("exit", (code) => (code === 0 ? resolve(outFile) : reject(new Error(`ffmpeg exited with code ${code}`))));
 		});
@@ -949,28 +953,62 @@ const run = async () => {
 	};
 
 	const stopNow = () => {
+		if (!running) return;
 		running = false;
 		clearInterval(timer);
 		if (statusTimer) clearInterval(statusTimer);
 		if (process.stdin.isTTY) process.stdin.setRawMode(false);
 		process.stdin.pause();
 		captureLog.message("Stopped.");
-		captureLog.path("📂 Snapshots saved in:", runDir);
+		captureLog.path("📂 Capture folder:", runDir);
 		process.exit(0);
 	};
 
+
+	const requestStop = () => {
+		if (!running || wantStop) return;
+		wantStop = true;
+		clearInterval(timer);
+		if (statusTimer) clearInterval(statusTimer);
+		captureLog.info("\nStopping capture...");
+		if (snapshotProcess) snapshotProcess.kill("SIGTERM");
+		if (!capturing) stopNow();
+	};
+
+	if (process.stdin.isTTY) {
+		readline.emitKeypressEvents(process.stdin);
+		process.stdin.setRawMode(true);
+		process.stdin.resume();
+		let confirming = false;
+		process.stdin.on("keypress", (key, details) => {
+			if (!running || wantStop) return;
+			if (details?.ctrl && details.name === "c") return requestStop();
+			if (confirming) {
+				confirming = false;
+				if (key?.toLowerCase() === "y") requestStop();
+				else captureLog.message("\nContinuing capture.");
+			} else if (key?.toLowerCase() === "s") {
+				confirming = true;
+				process.stdout.write("\nStop capturing? (y/N) ");
+			}
+		});
+	}
+	process.on("SIGINT", requestStop);
+	process.on("SIGTERM", requestStop);
+
 	const loop = async () => {
-		if (!running || capturing) return;
+		if (!running || wantStop || capturing) return;
 		capturing = true;
 
 		try {
 			await captureSnapshotStatus();
+			if (wantStop) return;
 			const outFile = await takeSnapshot();
 			// captureLog.message(`✅ ${now.toLocaleTimeString()} 💾 ${path.basename(outFile)}`);
 			captureLog.message(`✅ ${formatLocalTimestamp(new Date())} 💾 ${path.basename(outFile)}`);
 			index++;
 		} catch (err) {
-			captureLog.error(`❌ snapshot failed: ${err?.message ?? err}`);
+			if (!wantStop) captureLog.error(`❌ snapshot failed: ${err?.message ?? err}`);
 		} finally {
 			capturing = false;
 			if (wantStop) stopNow();
@@ -980,7 +1018,7 @@ const run = async () => {
 	captureLog.path("📂 Capture folder:", runDir);
 	captureLog.info(`Capturing every ${opts.interval}s`);
 	captureLog.info(`Timestamp overlay: ${opts.timestamp ? "on" : "off"}`);
-	captureLog.message(`Press "s" to stop (with confirmation).`);
+	captureLog.message('Press "s", then "y" to stop. Any other key cancels.');
 
 	if (opts.statusUrl && opts.waitForPrinting) {
 		captureLog.info("Waiting for printer status to switch to PRINTING...");
@@ -1016,7 +1054,7 @@ const run = async () => {
 		}
 	}
 
-	const timer = setInterval(loop, opts.interval * 1000);
+	timer = setInterval(loop, opts.interval * 1000);
 	await loop();
 
 	if (opts.statusUrl) {
@@ -1059,41 +1097,6 @@ const run = async () => {
 		await checkStatus();
 	}
 
-	if (process.stdin.isTTY) {
-		process.stdin.setEncoding("utf8");
-		process.stdin.setRawMode(true);
-		process.stdin.resume();
-
-		let confirming = false;
-
-		process.stdin.on("data", (key) => {
-			if (!running) return;
-
-			if (key === "\u0003") {
-				captureLog.message("\nCtrl+C");
-				stopNow();
-				return;
-			}
-
-			if (!confirming && (key === "s" || key === "S")) {
-				confirming = true;
-				process.stdout.write("\nStop capturing? (y/N) ");
-				return;
-			}
-
-			if (confirming) {
-				const k = key.trim().toLowerCase();
-				if (k === "y") {
-					wantStop = true;
-					process.stdout.write("\nStopping...\n");
-					if (!capturing) stopNow();
-				} else {
-					process.stdout.write("\nContinuing.\n");
-				}
-				confirming = false;
-			}
-		});
-	}
 };
 
 run().catch((err) => {

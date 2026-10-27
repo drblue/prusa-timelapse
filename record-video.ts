@@ -336,5 +336,6 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 		process.stdin.pause();
 		process.removeListener("SIGINT", stop);
 		process.removeListener("SIGTERM", stop);
+		captureLog.path("📂 Capture folder:", runDir);
 	}
 };
