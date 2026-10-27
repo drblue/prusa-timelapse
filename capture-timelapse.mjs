@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { formatPrinterStatus } from "./printer-status-format.ts";
 import { captureLog } from "./capture-log.ts";
 import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
@@ -718,22 +719,6 @@ const discoverPrusaLinkCamera = async (opts) => {
 	};
 };
 
-const formatDuration = (totalSeconds) => {
-	if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return null;
-	const s = Math.round(totalSeconds);
-	const hours = Math.floor(s / 3600);
-	const minutes = Math.floor((s % 3600) / 60);
-	const seconds = s % 60;
-	if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
-	return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
-};
-
-const formatEtaTime = (remainingSeconds) => {
-	if (!Number.isFinite(remainingSeconds) || remainingSeconds < 0) return null;
-	const eta = new Date(Date.now() + remainingSeconds * 1000);
-	return `${String(eta.getHours()).padStart(2, "0")}:${String(eta.getMinutes()).padStart(2, "0")}`;
-};
-
 const buildDrawTextFilter = (opts) => {
 	const fontExists = opts.font && fs.existsSync(opts.font);
 	const fontPart = fontExists ? `fontfile=${opts.font}:` : "";
@@ -824,7 +809,10 @@ const run = async () => {
 	fs.mkdirSync(runDir, { recursive: true });
 	if (opts.video) {
 		const printer = opts.statusUrl ? {
-			readState: async (signal) => readPath(await fetchStatusData(opts, signal), opts.statusPath),
+			readState: async (signal) => {
+				const data = await fetchStatusData(opts, signal);
+				return { state: readPath(data, opts.statusPath), job: data?.job };
+			},
 			intervalMs: opts.statusInterval * 1000,
 			doneStates: opts.statusDone.split(","),
 			waitForPrinting: opts.waitForPrinting,
@@ -1003,9 +991,9 @@ const run = async () => {
 				const value = readPath(data, opts.statusPath);
 				const stamp = formatLocalTimestamp(new Date());
 				if (value === undefined) {
-					captureLog.message(`🖨️  ${stamp} status: (missing at ${opts.statusPath})`);
+					captureLog.message(`🖨️ ${stamp} status: (missing at ${opts.statusPath})`);
 				} else {
-					captureLog.message(`🖨️  ${stamp} status: ${String(value)}`);
+					captureLog.message(formatPrinterStatus(value, data?.job));
 				}
 				if (typeof value === "string" && value.toLowerCase() === "printing") {
 					// Capture job info when printing starts
@@ -1051,24 +1039,9 @@ const run = async () => {
 				}
 
 				if (value === undefined) {
-					captureLog.message(`🖨️  ${stamp} status: (missing at ${opts.statusPath})`);
+					captureLog.message(`🖨️ ${stamp} status: (missing at ${opts.statusPath})`);
 				} else {
-					let suffix = "";
-					if (typeof value === "string" && value.toLowerCase() === "printing") {
-						const progress = data?.job?.progress;
-						const timePrinting = data?.job?.time_printing;
-						const timeRemaining = data?.job?.time_remaining;
-						const elapsed = formatDuration(timePrinting);
-						const remaining = formatDuration(timeRemaining);
-						const eta = formatEtaTime(timeRemaining);
-						if (elapsed) suffix += ` elapsed ${elapsed}`;
-						if (remaining) suffix += `, remaining ${remaining}`;
-						if (eta) suffix += `, ETA ${eta}`;
-						if (typeof progress === "number" && Number.isFinite(progress)) {
-							suffix += `${suffix ? " " : ""}(${progress.toFixed(2)}%)`;
-						}
-					}
-					captureLog.message(`🖨️  ${stamp} status: ${String(value)}${suffix}`);
+					captureLog.message(formatPrinterStatus(value, data?.job));
 				}
 				if (typeof value === "string" && doneSet.has(value.toLowerCase())) {
 					const finishedAt = formatLocalTimestamp(new Date()).slice(11, 16);

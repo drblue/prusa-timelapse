@@ -1,3 +1,4 @@
+import { formatPrinterStatus } from "./printer-status-format.ts";
 import { captureLog } from "./capture-log.ts";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -317,8 +318,8 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 				monitoring = watchPrinterLifecycle(printer, controller.signal, resolve, (state) => {
 					captureLog.info(`${formatVideoTimestamp()} Printer status "${state}" detected. Finishing video...`);
 					stop();
-				}, (state) => {
-					captureLog.message(`${formatVideoTimestamp()} Printer status: ${state ?? "(missing)"}`);
+				}, (state, job) => {
+					captureLog.message(formatPrinterStatus(state, job));
 				}, (error) => {
 					captureLog.error(`${formatVideoTimestamp()} Printer status check failed: ${error instanceof Error ? error.message : String(error)}`);
 				});

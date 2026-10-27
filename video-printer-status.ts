@@ -1,3 +1,5 @@
+import type { PrinterJob } from "./printer-status-format.ts";
+
 export type PrinterLifecycleOptions = {
 	readState: (signal: AbortSignal) => Promise<unknown>;
 	intervalMs: number;
@@ -23,7 +25,7 @@ export const watchPrinterLifecycle = async (
 	signal: AbortSignal,
 	onReady: (start: boolean) => void,
 	onDone: (state: string) => void,
-	onState: (state: unknown) => void = () => {},
+	onState: (state: unknown, job?: PrinterJob) => void = () => {},
 	onError: (error: unknown) => void = () => {},
 ) => {
 	let ready = false;
@@ -35,9 +37,12 @@ export const watchPrinterLifecycle = async (
 	try {
 		while (!signal.aborted) {
 			try {
-				const value = await opts.readState(signal);
+				const result = await opts.readState(signal);
+				const snapshot = result !== null && typeof result === "object" && "state" in result
+					? result as { state: unknown; job?: PrinterJob } : { state: result };
+				const value = snapshot.state;
 				if (signal.aborted) break;
-				onState(value);
+				onState(value, snapshot.job);
 				const state = typeof value === "string" ? value.trim().toLowerCase() : undefined;
 				if (state === "printing") { printingSeen = true; start(); }
 				// An idle printer before a job starts is not evidence of job completion.
