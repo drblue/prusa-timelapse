@@ -1,4 +1,5 @@
 import { formatPrinterStatus } from "./printer-status-format.ts";
+import { writeVideoTimeline } from "./video-telemetry.ts";
 import { captureLog } from "./capture-log.ts";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
@@ -270,7 +271,9 @@ export const captureVideo = async (
 		signal.removeEventListener("abort", markStopped);
 		if (parts.length) {
 			captureLog.info("Finishing video; please wait...");
-			await joinParts(partsDir, parts, outFile, stoppedAt ?? Date.now());
+			const endedAt = stoppedAt ?? Date.now();
+			writeVideoTimeline(runDir, parts, endedAt);
+			await joinParts(partsDir, parts, outFile, endedAt);
 			if (!failure) fs.rmSync(partsDir, { recursive: true });
 			captureLog.path("🎬 Video saved in:", outFile);
 		}

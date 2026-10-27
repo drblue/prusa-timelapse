@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { appendVideoStatus } from "./video-telemetry.ts";
 import { formatPrinterStatus } from "./printer-status-format.ts";
 import { captureLog } from "./capture-log.ts";
 import { spawn, spawnSync } from "node:child_process";
@@ -810,7 +811,9 @@ const run = async () => {
 	if (opts.video) {
 		const printer = opts.statusUrl ? {
 			readState: async (signal) => {
+				const requestStartedAt = new Date();
 				const data = await fetchStatusData(opts, signal);
+				appendVideoStatus(runDir, data, requestStartedAt);
 				return { state: readPath(data, opts.statusPath), job: data?.job };
 			},
 			intervalMs: opts.statusInterval * 1000,
@@ -818,6 +821,7 @@ const run = async () => {
 			waitForPrinting: opts.waitForPrinting,
 			waitTimeoutMs: opts.waitTimeout * 1000,
 		} : undefined;
+		if (printer) captureLog.path("📊 Printer status log:", path.join(runDir, "recording-status.jsonl"));
 		await recordVideo(opts, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null, printer);
 		return;
 	}

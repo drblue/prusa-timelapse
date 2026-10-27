@@ -70,6 +70,10 @@ Video mode requires an interactive terminal and a continuous video stream (such 
 
 ### Capture options
 
+Video capture saves each successful printer status response to `recording-status.jsonl` in the capture folder, including request and receipt timestamps (UTC), `printer.axis_z`, and any other fields returned by the printer. Sampling uses `--status-interval` (default 30 seconds); for example, `--status-interval 5` samples every five seconds, plus request time. Sampling starts while waiting for PRINTING and includes the completion response. No status endpoint means no printer telemetry. Failed requests leave gaps rather than invented measurements.
+
+At video finalization, `recording-timeline.json` records the usable video parts, their offsets and held-picture intervals. For RTSP recordings with `mapping: "receiver-wall-clock"`, video time in seconds is approximately `(status.fetchedAt - timelineStartedAt) / 1000`. Samples before time zero were taken before the first usable video part. Camera buffering and request latency make this approximate, not frame-accurate. During an outage, the video may hold an older picture while printer status continues changing. Inputs without a receiver timestamp have `mapping: "unavailable"`; do not infer wall-clock offsets for them. Z height is preserved as reported, including Z hops; it does not establish an exact layer number. The JSONL stores complete status responses; credentials and request headers are not added.
+
 ```
 --video       Record MP4 video; stop on printer completion when status is configured
 --config      Path(s) to config files (repeat or comma-separated)
