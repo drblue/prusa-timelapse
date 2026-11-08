@@ -1,6 +1,11 @@
 // Postman's mock runtime requires CommonJS. No real printer credentials are used.
 const http = require("node:http");
 const sequences = {
+	"late-print": [
+		{ printer: { state: "PRINTING", axis_z: 50 }, job: { progress: 55, time_remaining: 6120 } },
+		{ printer: { state: "PRINTING", axis_z: 51 }, job: { progress: 56, time_remaining: 6090 } },
+		"FINISHED",
+	],
 	"video-overlay": [
 		{ printer: { state: "IDLE" } },
 		{ printer: { state: "PRINTING", temp_nozzle: 220, target_nozzle: 220, temp_bed: 60, target_bed: 60, axis_z: 0.2 }, job: { progress: 0, time_printing: 1, time_remaining: 3600 } },
@@ -9,7 +14,11 @@ const sequences = {
 		{ printer: { state: "FINISHED" }, job: { progress: 100, time_printing: 15, time_remaining: 0 } },
 	],
 	finished: ["IDLE", "PRINTING", "PAUSED", "PRINTING", "FINISHED"],
-	"warming-up": ["IDLE", "BUSY", "PAUSED", "PRINTING", "FINISHED"],
+	"warming-up": ["IDLE", "BUSY", "PAUSED",
+		{ printer: { state: "PRINTING", axis_z: 234.5, temp_nozzle: 122.4, target_nozzle: 120, temp_bed: 39.2, target_bed: 50 }, job: { progress: 0, time_remaining: 3480 } },
+		{ printer: { state: "PRINTING", axis_z: 40, temp_nozzle: 215.6, target_nozzle: 215, temp_bed: 50.5, target_bed: 50 }, job: { progress: 0, time_remaining: 14460 } },
+		{ printer: { state: "PRINTING", axis_z: -0.5, temp_nozzle: 170, target_nozzle: 170, temp_bed: 50, target_bed: 50 }, job: { progress: 0, time_remaining: 14460 } },
+		"PRINTING", "FINISHED"],
 	"completed-idle": ["IDLE", "PRINTING", "IDLE"],
 	canceled: ["IDLE", "PRINTING", "CANCELED"],
 	idle: ["IDLE", "IDLE", "IDLE"],
@@ -38,5 +47,8 @@ http.createServer(async (req, res) => {
 	if (state === "http-error") { res.writeHead(503); res.end(JSON.stringify({ error: "Test outage" })); return; }
 	// Shape matches api-responses/status-response when printing.json.
 	res.writeHead(200);
-	res.end(JSON.stringify({ printer: state === "missing" ? {} : { state } }));
+	res.end(JSON.stringify({
+		printer: state === "missing" ? {} : { state, ...(state === "PRINTING" ? { axis_z: 0.2, temp_nozzle: 220, target_nozzle: 220, temp_bed: 50, target_bed: 50 } : {}) },
+		...(state === "PRINTING" ? { job: { progress: 0, time_remaining: 14460 } } : {}),
+	}));
 }).listen(process.env.PORT || 4901);

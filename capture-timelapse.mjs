@@ -829,7 +829,7 @@ const run = async () => {
 					const data = await fetchStatusData(opts, signal);
 					appendVideoStatus(runDir, data, requestStartedAt);
 					overlay?.update(data);
-					return { state: readPath(data, opts.statusPath), job: data?.job };
+					return { state: readPath(data, opts.statusPath), job: data?.job, printer: data?.printer };
 				} catch (error) {
 					if (!signal.aborted) overlay?.clear();
 					throw error;

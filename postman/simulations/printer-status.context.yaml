@@ -30,7 +30,25 @@ assumptions:
     verification: Real FFmpeg frame tests verified changing text and escaping. A full CLI run against the local video-overlay simulation encoded telemetry by default and omitted it with telemetry=false. These synthetic video tests do not establish camera quality or physical first-layer timing.
     source: video-overlay.ts; tests/video-overlay.test.ts; postman/mocks/printer-status/default.cjs; /tmp/prusa-video-overlay-check/check.mjs
     updated_at: "2026-11-08"
+  - id: remaining-time-means-first-layer
+    status: contradicted
+    claim: The presence of job.time_remaining establishes physical first-layer printing.
+    reason: Both saved Core One runs include this field during preparation, including nozzle 122.4 C at Z 234.5 mm and nozzle 215.6 C at Z 40 mm.
+    verification: Read existing recording-status.jsonl samples; the application now combines remaining time with positive progress or low Z and attained temperatures. No physical first-layer timing is claimed.
+    source: snapshots/20261108-163645/recording-status.jsonl; snapshots/20261108-172349/recording-status.jsonl; video-printer-status.ts
+    updated_at: "2026-11-08"
+  - id: estimated-network-start
+    status: supported
+    claim: The caller waits through the modeled preparation, starts at zero progress when first-layer conditions match, and starts immediately when launched during positive-progress printing.
+    reason: A network-only estimate was accepted by the user; already-running prints must not require first-layer Z. PRINTING and valid remaining time are required for both paths.
+    verification: Regression tests passed for observed preparation values, missing/invalid measurements, cancellation during preparation, and positive-progress startup. Eleven HTTP lifecycle checks passed against the local simulation. Two full CLI runs with synthetic video verified no capture log during three preparation responses and immediate capture on late-print startup. Physical camera timing remains unverified.
+    source: tests/video-printer-start.test.ts; tests/printer-status.integration.ts; postman/mocks/printer-status/default.cjs; /tmp/prusa-network-start-check.mjs
+    updated_at: "2026-11-08"
 fingerprints:
+  - id: estimated-first-layer-20261108
+    date: "2026-11-08"
+    commit: "c96543f (base; network start estimate in working tree)"
+    cli: "Postman CLI 1.74.0; local simulation supported; postman status unavailable in this installed version"
   - id: video-telemetry-20261108
     date: "2026-11-08"
     commit: "b71a4b9 (base; video telemetry changes in working tree)"

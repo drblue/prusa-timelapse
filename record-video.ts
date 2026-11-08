@@ -321,7 +321,7 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 	let monitoring: Promise<void> | undefined;
 	try {
 		if (printer) {
-			captureLog.info("Waiting for printer status to switch to PRINTING...");
+			captureLog.info("Waiting for PRINTING with remaining time and either positive progress or estimated first-layer conditions (low Z, heated nozzle/bed)...");
 			const ready = new Promise<boolean>((resolve) => {
 				monitoring = watchPrinterLifecycle(printer, controller.signal, resolve, (state) => {
 					captureLog.info(`${formatVideoTimestamp()} Printer status "${state}" detected. Finishing video...`);
@@ -333,7 +333,7 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 				});
 			});
 			if (await ready && !controller.signal.aborted) {
-				captureLog.info("Printer is PRINTING; starting video capture...");
+				captureLog.info("Print start estimated from printer telemetry; starting video capture...");
 				await captureVideo(opts, runDir, filter, controller.signal);
 			}
 		}
