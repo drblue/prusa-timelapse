@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { buildSnapshotTelemetryFilters } from "./snapshot-telemetry.ts";
+import { createVideoTelemetryOverlay } from "./video-overlay.ts";
 import { appendVideoStatus } from "./video-telemetry.ts";
 import { formatPrinterStatus } from "./printer-status-format.ts";
 import { captureLog } from "./capture-log.ts";
@@ -200,6 +202,7 @@ const applyConfigToOpts = (opts, config) => {
 		setNumber("quality", data.quality);
 
 		setBool("timestamp", data.timestamp);
+		setBool("telemetry", data.telemetry);
 		setBool("video", data.video);
 		setBool("repairRtsp", data.repairRtsp);
 		setIfDefined("videoAspect", data.videoAspect);
@@ -239,6 +242,7 @@ const applyConfigToOpts = (opts, config) => {
 		setNumber("quality", data.QUALITY);
 
 		setBool("timestamp", data.TIMESTAMP);
+		setBool("telemetry", data.TELEMETRY);
 		setBool("video", data.VIDEO);
 		setBool("repairRtsp", data.REPAIR_RTSP);
 		setIfDefined("videoAspect", data.VIDEO_ASPECT);
@@ -289,6 +293,7 @@ const parseArgs = async () => {
 		quality: 2, // 2-31 (lower = better) for JPEG
 
 		timestamp: true,
+		telemetry: true,
 		font: getDefaultFontPath(),
 		fontsize: 24,
 		padding: 10,
@@ -340,6 +345,7 @@ const parseArgs = async () => {
 		else if (a === "--transport") overrides.transport = v, i++;
 		else if (a === "--quality") overrides.quality = Number(v), i++;
 
+		else if (a === "--telemetry") overrides.telemetry = v !== "false", i++;
 		else if (a === "--timestamp") overrides.timestamp = v !== "false", i++;
 		else if (a === "--font") overrides.font = v, i++;
 		else if (a === "--fontsize") overrides.fontsize = Number(v), i++;
@@ -390,6 +396,9 @@ Options:
 	--transport   tcp|udp (default: tcp)
 	--quality     JPEG quality 2-31 (default: 2)
 
+Telemetry overlay:
+	--telemetry   true|false (default: true); embed printer telemetry in snapshots and video
+
 Timestamp overlay:
 	--timestamp   true|false (default: true)
 	--font        Font file path (default: OS-specific)
@@ -421,8 +430,8 @@ Printer status polling:
 	--status-header   Optional header in "Key: Value" format
 	--status-path     JSON path to status value (default: printer.state)
 	--status-done     Comma list of done values (default: idle,finished,stopped,canceled,error)
-	--wait-for-printing true|false (default: true)
-	--wait-timeout    Seconds to wait for PRINTING before starting anyway (default: 0 = never)
+	--wait-for-printing true|false (snapshots only; video always waits for PRINTING)
+	--wait-timeout    Snapshot wait timeout in seconds (default: 0 = never; video ignores this)
 
 Controls:
 	Press "s" to stop (asks for confirmation).
@@ -793,36 +802,45 @@ const run = async () => {
 		throw new Error("--interval must be > 0");
 	}
 
-	if (opts.timestamp) {
+	if (opts.timestamp || (opts.telemetry && opts.statusUrl)) {
 		try {
 			if (!ffmpegHasFilter("drawtext")) {
-				captureLog.warn("⚠️  ffmpeg does not include the drawtext filter; disabling timestamp overlay.");
-				captureLog.message("   Install an ffmpeg build with drawtext support, or pass --timestamp false to silence this warning.");
+				captureLog.warn("⚠️  ffmpeg does not include the drawtext filter; disabling timestamp and telemetry overlays.");
+				captureLog.message("   Install an ffmpeg build with drawtext support, or disable overlays with --timestamp false --telemetry false.");
 				opts.timestamp = false;
+				opts.telemetry = false;
 			}
 		} catch (err) {
 			captureLog.warn(`⚠️  Could not inspect ffmpeg filters: ${err?.message ?? err}`);
-			captureLog.message("   Continuing with timestamp overlay enabled.");
+			captureLog.message("   Continuing with requested overlays enabled.");
 		}
 	}
 
+	if (opts.video && !opts.statusUrl) {
+		throw new Error("Video capture requires a printer status endpoint (--status-url or PrusaLink settings) so it can wait for PRINTING.");
+	}
 	const runDir = path.join(opts.baseDir, formatRunStamp());
 	fs.mkdirSync(runDir, { recursive: true });
 	if (opts.video) {
+		const overlay = opts.telemetry ? createVideoTelemetryOverlay(runDir) : null;
 		const printer = opts.statusUrl ? {
 			readState: async (signal) => {
-				const requestStartedAt = new Date();
-				const data = await fetchStatusData(opts, signal);
-				appendVideoStatus(runDir, data, requestStartedAt);
-				return { state: readPath(data, opts.statusPath), job: data?.job };
+				try {
+					const requestStartedAt = new Date();
+					const data = await fetchStatusData(opts, signal);
+					appendVideoStatus(runDir, data, requestStartedAt);
+					overlay?.update(data);
+					return { state: readPath(data, opts.statusPath), job: data?.job, printer: data?.printer };
+				} catch (error) {
+					if (!signal.aborted) overlay?.clear();
+					throw error;
+				}
 			},
 			intervalMs: opts.statusInterval * 1000,
 			doneStates: opts.statusDone.split(","),
-			waitForPrinting: opts.waitForPrinting,
-			waitTimeoutMs: opts.waitTimeout * 1000,
 		} : undefined;
 		if (printer) captureLog.path("📊 Printer status log:", path.join(runDir, "recording-status.jsonl"));
-		await recordVideo(opts, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null, printer);
+		await recordVideo({ ...opts, telemetryFile: overlay?.file }, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null, printer);
 		return;
 	}
 
@@ -853,6 +871,7 @@ const run = async () => {
 					prefix: opts.prefix,
 					ext: opts.ext,
 					timestampOverlay: opts.timestamp,
+					telemetryOverlay: Boolean(opts.telemetry && opts.statusUrl),
 					font: opts.font,
 					transport: opts.transport,
 					status: opts.statusUrl
@@ -884,7 +903,7 @@ const run = async () => {
 	let statusTimer = null;
 	let jobInfoCaptured = false;
 
-	const takeSnapshot = () =>
+	const takeSnapshot = (statusData) =>
 		new Promise((resolve, reject) => {
 			const filename = `${opts.prefix}${padIndex(index)}.${opts.ext}`;
 			const outFile = path.join(runDir, filename);
@@ -919,6 +938,7 @@ const run = async () => {
 
 			ffmpegArgs.push("-i", opts.url, "-an");
 
+			const filters = [];
 			if (opts.timestamp) {
 				const { filter, fontExists } = buildDrawTextFilter(opts);
 				if (!fontExists && !warnedFontMissing) {
@@ -926,8 +946,11 @@ const run = async () => {
 					captureLog.warn(`⚠️  Font not found at: ${opts.font}`);
 					captureLog.message("   Continuing without explicit fontfile. If drawtext fails, pass --font /path/to/font.ttf");
 				}
-				ffmpegArgs.push("-vf", filter);
+				filters.push(filter);
 			}
+
+			if (opts.telemetry) filters.push(...buildSnapshotTelemetryFilters(statusData, opts));
+			if (filters.length) ffmpegArgs.push("-vf", filters.join(","));
 
 			ffmpegArgs.push("-frames:v", "1");
 
@@ -951,8 +974,10 @@ const run = async () => {
 			const statusFilename = `${opts.prefix}${padIndex(index)}_status.json`;
 			const statusFile = path.join(runDir, statusFilename);
 			fs.writeFileSync(statusFile, JSON.stringify(statusData, null, 2) + "\n");
+			return statusData;
 		} catch (err) {
 			captureLog.warn(`⚠️  status capture failed: ${err?.message ?? "(no error message)"}`);
+			return null;
 		}
 	};
 
@@ -1005,9 +1030,9 @@ const run = async () => {
 		capturing = true;
 
 		try {
-			await captureSnapshotStatus();
+			const statusData = await captureSnapshotStatus();
 			if (wantStop) return;
-			const outFile = await takeSnapshot();
+			const outFile = await takeSnapshot(statusData);
 			// captureLog.message(`✅ ${now.toLocaleTimeString()} 💾 ${path.basename(outFile)}`);
 			captureLog.message(`✅ ${formatLocalTimestamp(new Date())} 💾 ${path.basename(outFile)}`);
 			index++;
@@ -1022,6 +1047,7 @@ const run = async () => {
 	captureLog.path("📂 Capture folder:", runDir);
 	captureLog.info(`Capturing every ${opts.interval}s`);
 	captureLog.info(`Timestamp overlay: ${opts.timestamp ? "on" : "off"}`);
+	captureLog.info(`Snapshot telemetry overlay: ${opts.telemetry && opts.statusUrl ? "on" : "off"}`);
 	captureLog.message('Press "s", then "y" to stop. Any other key cancels.');
 
 	if (opts.statusUrl && opts.waitForPrinting) {

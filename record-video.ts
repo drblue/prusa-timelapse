@@ -9,14 +9,17 @@ import readline from "node:readline";
 import { formatVideoTimestamp, watchPrinterLifecycle } from "./video-printer-status.ts";
 import type { PrinterLifecycleOptions } from "./video-printer-status.ts";
 import { createRepairProxy } from "./rtsp-repair.ts";
+import { buildVideoTelemetryFilter } from "./video-overlay.ts";
+import type { VideoOverlayOptions } from "./video-overlay.ts";
 
-export type VideoOptions = {
+export type VideoOptions = VideoOverlayOptions & {
 	url: string;
 	transport: string;
 	loglevel: string;
 	captureHeader?: string | null;
 	repairRtsp?: boolean;
 	videoAspect?: string | null;
+	telemetryFile?: string;
 };
 
 const videoLoglevel = (opts: VideoOptions) => ["quiet", "panic", "fatal"].includes(opts.loglevel) ? "warning" : opts.loglevel;
@@ -54,6 +57,7 @@ export const buildVideoArgs = (opts: VideoOptions, outFile: string, filter?: str
 	if (opts.repairRtsp) args.push("-dts_delta_threshold", "3600");
 	args.push(...videoInputArgs(opts), "-map", "0:v:0", "-an");
 	const filters = [filter];
+	if (opts.telemetryFile) filters.push(buildVideoTelemetryFilter(opts.telemetryFile, opts));
 	if (opts.videoAspect) {
 		validateVideoAspect(opts.videoAspect);
 		filters.push(`setdar=${opts.videoAspect.replace(":", "/")}`);
@@ -283,6 +287,7 @@ export const captureVideo = async (
 };
 
 export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: string | null, printer?: PrinterLifecycleOptions) => {
+	if (!printer) throw new Error("Video capture requires a printer status endpoint so it can wait for PRINTING.");
 	const controller = new AbortController();
 	const wasRaw = process.stdin.isRaw;
 	let confirming = false;
@@ -310,13 +315,13 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 	process.on("SIGINT", stop);
 	process.on("SIGTERM", stop);
 	captureLog.path("📂 Capture folder:", runDir);
-	captureLog.path("🎬 Recording video to:", path.join(runDir, "recording.mp4"));
+	captureLog.path("🎬 Video will be saved to:", path.join(runDir, "recording.mp4"));
 	if (opts.repairRtsp) captureLog.info("Buddy3D TCP packet recovery enabled; using one camera connection.");
 	captureLog.message('Press "s", then "y" to stop. Any other key cancels. Ctrl+C also finishes the video.');
 	let monitoring: Promise<void> | undefined;
 	try {
 		if (printer) {
-			if (printer.waitForPrinting) captureLog.info("Waiting for printer status to switch to PRINTING...");
+			captureLog.info("Waiting for PRINTING with remaining time and either positive progress or estimated first-layer conditions (low Z, heated nozzle/bed)...");
 			const ready = new Promise<boolean>((resolve) => {
 				monitoring = watchPrinterLifecycle(printer, controller.signal, resolve, (state) => {
 					captureLog.info(`${formatVideoTimestamp()} Printer status "${state}" detected. Finishing video...`);
@@ -327,9 +332,10 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 					captureLog.error(`${formatVideoTimestamp()} Printer status check failed: ${error instanceof Error ? error.message : String(error)}`);
 				});
 			});
-			if (await ready && !controller.signal.aborted) await captureVideo(opts, runDir, filter, controller.signal);
-		} else {
-			await captureVideo(opts, runDir, filter, controller.signal);
+			if (await ready && !controller.signal.aborted) {
+				captureLog.info("Print start estimated from printer telemetry; starting video capture...");
+				await captureVideo(opts, runDir, filter, controller.signal);
+			}
 		}
 	} finally {
 		controller.abort();

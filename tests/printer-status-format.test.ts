@@ -22,11 +22,10 @@ test("missing and invalid telemetry is omitted", () => {
 test("video monitoring forwards job data while retaining start and stop transitions", async () => {
 	const controller = new AbortController();
 	const job = { time_printing: 8820, time_remaining: 6120, progress: 55 };
-	const snapshots = [{ state: "PRINTING", job }, { state: "FINISHED" }];
+	const snapshots = [{ state: "PRINTING", job, printer: { axis_z: 0.2, temp_nozzle: 220, target_nozzle: 220, temp_bed: 50, target_bed: 50 } }, { state: "FINISHED" }];
 	const events: unknown[] = [];
 	await watchPrinterLifecycle({
 		readState: async () => snapshots.shift(), intervalMs: 1, doneStates: ["finished"],
-		waitForPrinting: true, waitTimeoutMs: 0,
 	}, controller.signal, (ready) => events.push(ready), (state) => events.push(state), (state, details) => {
 		if (state === "PRINTING") assert.deepEqual(details, job);
 	});
