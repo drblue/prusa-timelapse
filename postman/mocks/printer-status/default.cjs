@@ -1,6 +1,13 @@
 // Postman's mock runtime requires CommonJS. No real printer credentials are used.
 const http = require("node:http");
 const sequences = {
+	"video-overlay": [
+		{ printer: { state: "IDLE" } },
+		{ printer: { state: "PRINTING", temp_nozzle: 220, target_nozzle: 220, temp_bed: 60, target_bed: 60, axis_z: 0.2 }, job: { progress: 0, time_printing: 1, time_remaining: 3600 } },
+		{ printer: { state: "PRINTING", temp_nozzle: 221, target_nozzle: 220, temp_bed: 60, target_bed: 60, axis_z: 10 }, job: { progress: 88, time_printing: 10, time_remaining: 1000 } },
+		{ printer: { state: "PRINTING", temp_nozzle: 221, target_nozzle: 220, temp_bed: 60, target_bed: 60, axis_z: 10 }, job: { progress: 88, time_printing: 10, time_remaining: 1000 } },
+		{ printer: { state: "FINISHED" }, job: { progress: 100, time_printing: 15, time_remaining: 0 } },
+	],
 	finished: ["IDLE", "PRINTING", "PAUSED", "PRINTING", "FINISHED"],
 	"warming-up": ["IDLE", "BUSY", "PAUSED", "PRINTING", "FINISHED"],
 	"completed-idle": ["IDLE", "PRINTING", "IDLE"],
@@ -27,6 +34,7 @@ http.createServer(async (req, res) => {
 	await pm.state.set(key, index + 1);
 	const sequence = sequences[scenario] || sequences.finished;
 	const state = sequence[Math.min(index, sequence.length - 1)];
+	if (state && typeof state === "object") { res.writeHead(200); res.end(JSON.stringify(state)); return; }
 	if (state === "http-error") { res.writeHead(503); res.end(JSON.stringify({ error: "Test outage" })); return; }
 	// Shape matches api-responses/status-response when printing.json.
 	res.writeHead(200);

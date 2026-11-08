@@ -17,13 +17,24 @@ assumptions:
     source: postman/mocks/printer-status/default.cjs; tests/printer-status.integration.ts; /tmp/prusa-print-start-check/check.mjs
     updated_at: "2026-11-08"
   - id: printing-means-physical-extrusion
-    status: unknown
+    status: contradicted
     claim: The physical printer reports PRINTING exactly when extrusion starts.
-    reason: No physical extrusion sensor or live print was observed. A job state may include preparation; the application follows the reported state.
-    verification: Local simulation only. No real printer or camera was contacted for this change.
-    source: video-printer-status.ts; README.md
+    reason: Captured Core One status logs report PRINTING during heating and calibration, including at Z 228.6 mm and 40 mm. Progress remains zero after Z reaches first-layer height, so waiting for positive progress would lose initial printing time.
+    verification: Inspected existing recording-status.jsonl files on 2026-11-08. This contradicts the earlier unverified assumption; no new camera capture was started. The firmware status renderer exposes no extrusion position or first-layer phase.
+    source: snapshots/20261108-172349/recording-status.jsonl; snapshots/20261108-163645/recording-status.jsonl; https://github.com/prusa3d/Prusa-Firmware-Buddy/blob/master/lib/WUI/nhttp/status_renderer.cpp
+    updated_at: "2026-11-08"
+  - id: video-overlay-status-refresh
+    status: supported
+    claim: Successful status polls can update telemetry in an already-running FFmpeg encoder.
+    reason: Video uses an atomically replaced text file and drawtext reload=1; failed polls clear the file instead of retaining stale measurements.
+    verification: Real FFmpeg frame tests verified changing text and escaping. A full CLI run against the local video-overlay simulation encoded telemetry by default and omitted it with telemetry=false. These synthetic video tests do not establish camera quality or physical first-layer timing.
+    source: video-overlay.ts; tests/video-overlay.test.ts; postman/mocks/printer-status/default.cjs; /tmp/prusa-video-overlay-check/check.mjs
     updated_at: "2026-11-08"
 fingerprints:
+  - id: video-telemetry-20261108
+    date: "2026-11-08"
+    commit: "b71a4b9 (base; video telemetry changes in working tree)"
+    cli: "Postman CLI 1.74.0; local simulation supported; postman status unavailable in this installed version"
   - id: strict-video-start-20261108
     date: "2026-11-08"
     commit: "3e8f0d1 (base; strict video-start changes in working tree)"

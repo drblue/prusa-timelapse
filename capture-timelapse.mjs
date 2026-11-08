@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createVideoTelemetryOverlay } from "./video-overlay.ts";
 import { appendVideoStatus } from "./video-telemetry.ts";
 import { formatPrinterStatus } from "./printer-status-format.ts";
 import { captureLog } from "./capture-log.ts";
@@ -200,6 +201,7 @@ const applyConfigToOpts = (opts, config) => {
 		setNumber("quality", data.quality);
 
 		setBool("timestamp", data.timestamp);
+		setBool("telemetry", data.telemetry);
 		setBool("video", data.video);
 		setBool("repairRtsp", data.repairRtsp);
 		setIfDefined("videoAspect", data.videoAspect);
@@ -239,6 +241,7 @@ const applyConfigToOpts = (opts, config) => {
 		setNumber("quality", data.QUALITY);
 
 		setBool("timestamp", data.TIMESTAMP);
+		setBool("telemetry", data.TELEMETRY);
 		setBool("video", data.VIDEO);
 		setBool("repairRtsp", data.REPAIR_RTSP);
 		setIfDefined("videoAspect", data.VIDEO_ASPECT);
@@ -289,6 +292,7 @@ const parseArgs = async () => {
 		quality: 2, // 2-31 (lower = better) for JPEG
 
 		timestamp: true,
+		telemetry: true,
 		font: getDefaultFontPath(),
 		fontsize: 24,
 		padding: 10,
@@ -340,6 +344,7 @@ const parseArgs = async () => {
 		else if (a === "--transport") overrides.transport = v, i++;
 		else if (a === "--quality") overrides.quality = Number(v), i++;
 
+		else if (a === "--telemetry") overrides.telemetry = v !== "false", i++;
 		else if (a === "--timestamp") overrides.timestamp = v !== "false", i++;
 		else if (a === "--font") overrides.font = v, i++;
 		else if (a === "--fontsize") overrides.fontsize = Number(v), i++;
@@ -389,6 +394,9 @@ Options:
 	--ext         jpg|png (default: jpg)
 	--transport   tcp|udp (default: tcp)
 	--quality     JPEG quality 2-31 (default: 2)
+
+Telemetry overlay:
+	--telemetry   true|false (default: true); embed printer telemetry in video
 
 Timestamp overlay:
 	--timestamp   true|false (default: true)
@@ -793,16 +801,17 @@ const run = async () => {
 		throw new Error("--interval must be > 0");
 	}
 
-	if (opts.timestamp) {
+	if (opts.timestamp || (opts.telemetry && opts.statusUrl)) {
 		try {
 			if (!ffmpegHasFilter("drawtext")) {
-				captureLog.warn("⚠️  ffmpeg does not include the drawtext filter; disabling timestamp overlay.");
-				captureLog.message("   Install an ffmpeg build with drawtext support, or pass --timestamp false to silence this warning.");
+				captureLog.warn("⚠️  ffmpeg does not include the drawtext filter; disabling timestamp and telemetry overlays.");
+				captureLog.message("   Install an ffmpeg build with drawtext support, or disable overlays with --timestamp false --telemetry false.");
 				opts.timestamp = false;
+				opts.telemetry = false;
 			}
 		} catch (err) {
 			captureLog.warn(`⚠️  Could not inspect ffmpeg filters: ${err?.message ?? err}`);
-			captureLog.message("   Continuing with timestamp overlay enabled.");
+			captureLog.message("   Continuing with requested overlays enabled.");
 		}
 	}
 
@@ -812,18 +821,25 @@ const run = async () => {
 	const runDir = path.join(opts.baseDir, formatRunStamp());
 	fs.mkdirSync(runDir, { recursive: true });
 	if (opts.video) {
+		const overlay = opts.telemetry ? createVideoTelemetryOverlay(runDir) : null;
 		const printer = opts.statusUrl ? {
 			readState: async (signal) => {
-				const requestStartedAt = new Date();
-				const data = await fetchStatusData(opts, signal);
-				appendVideoStatus(runDir, data, requestStartedAt);
-				return { state: readPath(data, opts.statusPath), job: data?.job };
+				try {
+					const requestStartedAt = new Date();
+					const data = await fetchStatusData(opts, signal);
+					appendVideoStatus(runDir, data, requestStartedAt);
+					overlay?.update(data);
+					return { state: readPath(data, opts.statusPath), job: data?.job };
+				} catch (error) {
+					if (!signal.aborted) overlay?.clear();
+					throw error;
+				}
 			},
 			intervalMs: opts.statusInterval * 1000,
 			doneStates: opts.statusDone.split(","),
 		} : undefined;
 		if (printer) captureLog.path("📊 Printer status log:", path.join(runDir, "recording-status.jsonl"));
-		await recordVideo(opts, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null, printer);
+		await recordVideo({ ...opts, telemetryFile: overlay?.file }, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null, printer);
 		return;
 	}
 

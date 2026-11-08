@@ -9,14 +9,17 @@ import readline from "node:readline";
 import { formatVideoTimestamp, watchPrinterLifecycle } from "./video-printer-status.ts";
 import type { PrinterLifecycleOptions } from "./video-printer-status.ts";
 import { createRepairProxy } from "./rtsp-repair.ts";
+import { buildVideoTelemetryFilter } from "./video-overlay.ts";
+import type { VideoOverlayOptions } from "./video-overlay.ts";
 
-export type VideoOptions = {
+export type VideoOptions = VideoOverlayOptions & {
 	url: string;
 	transport: string;
 	loglevel: string;
 	captureHeader?: string | null;
 	repairRtsp?: boolean;
 	videoAspect?: string | null;
+	telemetryFile?: string;
 };
 
 const videoLoglevel = (opts: VideoOptions) => ["quiet", "panic", "fatal"].includes(opts.loglevel) ? "warning" : opts.loglevel;
@@ -54,6 +57,7 @@ export const buildVideoArgs = (opts: VideoOptions, outFile: string, filter?: str
 	if (opts.repairRtsp) args.push("-dts_delta_threshold", "3600");
 	args.push(...videoInputArgs(opts), "-map", "0:v:0", "-an");
 	const filters = [filter];
+	if (opts.telemetryFile) filters.push(buildVideoTelemetryFilter(opts.telemetryFile, opts));
 	if (opts.videoAspect) {
 		validateVideoAspect(opts.videoAspect);
 		filters.push(`setdar=${opts.videoAspect.replace(":", "/")}`);
