@@ -421,8 +421,8 @@ Printer status polling:
 	--status-header   Optional header in "Key: Value" format
 	--status-path     JSON path to status value (default: printer.state)
 	--status-done     Comma list of done values (default: idle,finished,stopped,canceled,error)
-	--wait-for-printing true|false (default: true)
-	--wait-timeout    Seconds to wait for PRINTING before starting anyway (default: 0 = never)
+	--wait-for-printing true|false (snapshots only; video always waits for PRINTING)
+	--wait-timeout    Snapshot wait timeout in seconds (default: 0 = never; video ignores this)
 
 Controls:
 	Press "s" to stop (asks for confirmation).
@@ -806,6 +806,9 @@ const run = async () => {
 		}
 	}
 
+	if (opts.video && !opts.statusUrl) {
+		throw new Error("Video capture requires a printer status endpoint (--status-url or PrusaLink settings) so it can wait for PRINTING.");
+	}
 	const runDir = path.join(opts.baseDir, formatRunStamp());
 	fs.mkdirSync(runDir, { recursive: true });
 	if (opts.video) {
@@ -818,8 +821,6 @@ const run = async () => {
 			},
 			intervalMs: opts.statusInterval * 1000,
 			doneStates: opts.statusDone.split(","),
-			waitForPrinting: opts.waitForPrinting,
-			waitTimeoutMs: opts.waitTimeout * 1000,
 		} : undefined;
 		if (printer) captureLog.path("📊 Printer status log:", path.join(runDir, "recording-status.jsonl"));
 		await recordVideo(opts, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null, printer);

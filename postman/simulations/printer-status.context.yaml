@@ -1,0 +1,30 @@
+purpose:
+  stands_in_for: PrusaLink GET /api/v1/status responses using the existing local fixture shape.
+  unblocks: Deterministic verification of video start/stop decisions without contacting a printer or camera.
+assumptions:
+  - id: printer-state-response-shape
+    status: supported
+    claim: The modeled status response exposes the state as printer.state.
+    reason: The local fixture and existing caller use this path; the simulation reproduces that contract shape.
+    verification: On 2026-11-08, ten HTTP lifecycle checks passed against the local simulation, including missing state and HTTP 503. This verifies the caller against the stand-in, not all physical-printer responses.
+    source: api-responses/status-response when printing.json; postman/mocks/printer-status/default.cjs; tests/printer-status.integration.ts
+    updated_at: "2026-11-08"
+  - id: nonprinting-status-before-printing
+    status: supported
+    claim: The stand-in can return IDLE, BUSY, PAUSED, missing state, or an HTTP failure before reporting PRINTING.
+    reason: These controlled sequences test that video does not mistake non-printing observations or elapsed time for a start signal.
+    verification: On 2026-11-08, the lifecycle caller waited for PRINTING in all modeled sequences, including legacy immediate-start and timeout options. A real CLI run with a local video fixture created no capture log during IDLE, then saved a video after simulated PRINTING and FINISHED.
+    source: postman/mocks/printer-status/default.cjs; tests/printer-status.integration.ts; /tmp/prusa-print-start-check/check.mjs
+    updated_at: "2026-11-08"
+  - id: printing-means-physical-extrusion
+    status: unknown
+    claim: The physical printer reports PRINTING exactly when extrusion starts.
+    reason: No physical extrusion sensor or live print was observed. A job state may include preparation; the application follows the reported state.
+    verification: Local simulation only. No real printer or camera was contacted for this change.
+    source: video-printer-status.ts; README.md
+    updated_at: "2026-11-08"
+fingerprints:
+  - id: strict-video-start-20261108
+    date: "2026-11-08"
+    commit: "3e8f0d1 (base; strict video-start changes in working tree)"
+    cli: "Postman CLI 1.74.0; local simulation supported; postman status unavailable in this installed version"

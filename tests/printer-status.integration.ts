@@ -6,23 +6,24 @@ import { formatVideoTimestamp, watchPrinterLifecycle } from "../video-printer-st
 
 const base = process.env.PRINTER_STATUS_SIMULATION_URL || "http://127.0.0.1:4901/printer";
 
-for (const [scenario, terminal] of [["finished", "FINISHED"], ["completed-idle", "IDLE"], ["canceled", "CANCELED"], ["recovery", "FINISHED"], ["error", "ERROR"], ["immediate", "FINISHED"], ["timeout", "FINISHED"]]) {
+for (const [scenario, terminal] of [["finished", "FINISHED"], ["warming-up", "FINISHED"], ["completed-idle", "IDLE"], ["canceled", "CANCELED"], ["recovery", "FINISHED"], ["error", "ERROR"], ["immediate", "FINISHED"], ["timeout", "FINISHED"]]) {
 	test(`printer lifecycle via HTTP: ${scenario}`, { timeout: 8000 }, async () => {
 		const controller = new AbortController();
 		const states: unknown[] = [], order: string[] = [], errors: unknown[] = [];
 		const timer = setTimeout(() => controller.abort(), 5000);
 		const run = randomUUID();
 		try {
-			await watchPrinterLifecycle({
-				readState: async (signal) => (await axios.get(`${base}/api/v1/status?case=${scenario}&run=${run}`, {
+			const options = {
+				readState: async (signal: AbortSignal) => (await axios.get(`${base}/api/v1/status?case=${scenario}&run=${run}`, {
 					headers: { "X-Api-Key": "test-printer-key" }, timeout: 1000, signal,
 				})).data.printer?.state,
 				intervalMs: 20,
 				doneStates: ["idle", "finished", "stopped", "canceled", "error"],
 				waitForPrinting: scenario !== "immediate",
 				waitTimeoutMs: scenario === "timeout" ? 1 : 0,
-			}, controller.signal, (start) => {
-				if (scenario === "timeout" && start) assert.ok(!states.includes("PRINTING"), "Timeout should start recording before PRINTING");
+			};
+			await watchPrinterLifecycle(options, controller.signal, (start) => {
+				if (start) assert.equal(states.at(-1), "PRINTING", "Recording must wait for PRINTING even with legacy opt-out or timeout settings");
 				order.push(start ? "start" : "canceled");
 			},
 				(state) => { order.push(state); controller.abort(); }, (state) => states.push(state), (error) => errors.push(error));
@@ -41,7 +42,7 @@ test("idle printer can be canceled before recording begins", { timeout: 5000 }, 
 		readState: async (signal) => (await axios.get(`${base}/api/v1/status?case=idle`, {
 			headers: { "X-Api-Key": "test-printer-key" }, timeout: 1000, signal,
 		})).data.printer.state,
-		intervalMs: 20, doneStates: ["idle", "finished"], waitForPrinting: true, waitTimeoutMs: 0,
+		intervalMs: 20, doneStates: ["idle", "finished"],
 	}, controller.signal, (start) => ready.push(start), () => assert.fail("Initial IDLE must not finish a job"), () => controller.abort());
 	assert.deepEqual(ready, [false]);
 });

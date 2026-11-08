@@ -283,6 +283,7 @@ export const captureVideo = async (
 };
 
 export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: string | null, printer?: PrinterLifecycleOptions) => {
+	if (!printer) throw new Error("Video capture requires a printer status endpoint so it can wait for PRINTING.");
 	const controller = new AbortController();
 	const wasRaw = process.stdin.isRaw;
 	let confirming = false;
@@ -310,13 +311,13 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 	process.on("SIGINT", stop);
 	process.on("SIGTERM", stop);
 	captureLog.path("📂 Capture folder:", runDir);
-	captureLog.path("🎬 Recording video to:", path.join(runDir, "recording.mp4"));
+	captureLog.path("🎬 Video will be saved to:", path.join(runDir, "recording.mp4"));
 	if (opts.repairRtsp) captureLog.info("Buddy3D TCP packet recovery enabled; using one camera connection.");
 	captureLog.message('Press "s", then "y" to stop. Any other key cancels. Ctrl+C also finishes the video.');
 	let monitoring: Promise<void> | undefined;
 	try {
 		if (printer) {
-			if (printer.waitForPrinting) captureLog.info("Waiting for printer status to switch to PRINTING...");
+			captureLog.info("Waiting for printer status to switch to PRINTING...");
 			const ready = new Promise<boolean>((resolve) => {
 				monitoring = watchPrinterLifecycle(printer, controller.signal, resolve, (state) => {
 					captureLog.info(`${formatVideoTimestamp()} Printer status "${state}" detected. Finishing video...`);
@@ -327,9 +328,10 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 					captureLog.error(`${formatVideoTimestamp()} Printer status check failed: ${error instanceof Error ? error.message : String(error)}`);
 				});
 			});
-			if (await ready && !controller.signal.aborted) await captureVideo(opts, runDir, filter, controller.signal);
-		} else {
-			await captureVideo(opts, runDir, filter, controller.signal);
+			if (await ready && !controller.signal.aborted) {
+				captureLog.info("Printer is PRINTING; starting video capture...");
+				await captureVideo(opts, runDir, filter, controller.signal);
+			}
 		}
 	} finally {
 		controller.abort();

@@ -26,7 +26,6 @@ test("video monitoring forwards job data while retaining start and stop transiti
 	const events: unknown[] = [];
 	await watchPrinterLifecycle({
 		readState: async () => snapshots.shift(), intervalMs: 1, doneStates: ["finished"],
-		waitForPrinting: true, waitTimeoutMs: 0,
 	}, controller.signal, (ready) => events.push(ready), (state) => events.push(state), (state, details) => {
 		if (state === "PRINTING") assert.deepEqual(details, job);
 	});

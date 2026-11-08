@@ -2,6 +2,7 @@
 const http = require("node:http");
 const sequences = {
 	finished: ["IDLE", "PRINTING", "PAUSED", "PRINTING", "FINISHED"],
+	"warming-up": ["IDLE", "BUSY", "PAUSED", "PRINTING", "FINISHED"],
 	"completed-idle": ["IDLE", "PRINTING", "IDLE"],
 	canceled: ["IDLE", "PRINTING", "CANCELED"],
 	idle: ["IDLE", "IDLE", "IDLE"],

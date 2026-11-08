@@ -4,8 +4,6 @@ export type PrinterLifecycleOptions = {
 	readState: (signal: AbortSignal) => Promise<unknown>;
 	intervalMs: number;
 	doneStates: string[];
-	waitForPrinting: boolean;
-	waitTimeoutMs: number;
 };
 
 export const formatVideoTimestamp = (date = new Date()) => {
@@ -30,10 +28,8 @@ export const watchPrinterLifecycle = async (
 ) => {
 	let ready = false;
 	let printingSeen = false;
-	const beganAt = Date.now();
 	const done = new Set(opts.doneStates.map((state) => state.trim().toLowerCase()).filter(Boolean));
 	const start = () => { if (!ready && !signal.aborted) { ready = true; onReady(true); } };
-	if (!opts.waitForPrinting) start();
 	try {
 		while (!signal.aborted) {
 			try {
@@ -50,7 +46,6 @@ export const watchPrinterLifecycle = async (
 			} catch (error) {
 				if (!signal.aborted) onError(error);
 			}
-			if (!ready && opts.waitTimeoutMs > 0 && Date.now() - beganAt >= opts.waitTimeoutMs) start();
 			if (!signal.aborted) await pause(opts.intervalMs, signal);
 		}
 	} finally {
