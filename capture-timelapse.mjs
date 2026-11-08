@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { buildSnapshotTelemetryFilters } from "./snapshot-telemetry.ts";
 import { createVideoTelemetryOverlay } from "./video-overlay.ts";
 import { appendVideoStatus } from "./video-telemetry.ts";
 import { formatPrinterStatus } from "./printer-status-format.ts";
@@ -396,7 +397,7 @@ Options:
 	--quality     JPEG quality 2-31 (default: 2)
 
 Telemetry overlay:
-	--telemetry   true|false (default: true); embed printer telemetry in video
+	--telemetry   true|false (default: true); embed printer telemetry in snapshots and video
 
 Timestamp overlay:
 	--timestamp   true|false (default: true)
@@ -870,6 +871,7 @@ const run = async () => {
 					prefix: opts.prefix,
 					ext: opts.ext,
 					timestampOverlay: opts.timestamp,
+					telemetryOverlay: Boolean(opts.telemetry && opts.statusUrl),
 					font: opts.font,
 					transport: opts.transport,
 					status: opts.statusUrl
@@ -901,7 +903,7 @@ const run = async () => {
 	let statusTimer = null;
 	let jobInfoCaptured = false;
 
-	const takeSnapshot = () =>
+	const takeSnapshot = (statusData) =>
 		new Promise((resolve, reject) => {
 			const filename = `${opts.prefix}${padIndex(index)}.${opts.ext}`;
 			const outFile = path.join(runDir, filename);
@@ -936,6 +938,7 @@ const run = async () => {
 
 			ffmpegArgs.push("-i", opts.url, "-an");
 
+			const filters = [];
 			if (opts.timestamp) {
 				const { filter, fontExists } = buildDrawTextFilter(opts);
 				if (!fontExists && !warnedFontMissing) {
@@ -943,8 +946,11 @@ const run = async () => {
 					captureLog.warn(`⚠️  Font not found at: ${opts.font}`);
 					captureLog.message("   Continuing without explicit fontfile. If drawtext fails, pass --font /path/to/font.ttf");
 				}
-				ffmpegArgs.push("-vf", filter);
+				filters.push(filter);
 			}
+
+			if (opts.telemetry) filters.push(...buildSnapshotTelemetryFilters(statusData, opts));
+			if (filters.length) ffmpegArgs.push("-vf", filters.join(","));
 
 			ffmpegArgs.push("-frames:v", "1");
 
@@ -968,8 +974,10 @@ const run = async () => {
 			const statusFilename = `${opts.prefix}${padIndex(index)}_status.json`;
 			const statusFile = path.join(runDir, statusFilename);
 			fs.writeFileSync(statusFile, JSON.stringify(statusData, null, 2) + "\n");
+			return statusData;
 		} catch (err) {
 			captureLog.warn(`⚠️  status capture failed: ${err?.message ?? "(no error message)"}`);
+			return null;
 		}
 	};
 
@@ -1022,9 +1030,9 @@ const run = async () => {
 		capturing = true;
 
 		try {
-			await captureSnapshotStatus();
+			const statusData = await captureSnapshotStatus();
 			if (wantStop) return;
-			const outFile = await takeSnapshot();
+			const outFile = await takeSnapshot(statusData);
 			// captureLog.message(`✅ ${now.toLocaleTimeString()} 💾 ${path.basename(outFile)}`);
 			captureLog.message(`✅ ${formatLocalTimestamp(new Date())} 💾 ${path.basename(outFile)}`);
 			index++;
@@ -1039,6 +1047,7 @@ const run = async () => {
 	captureLog.path("📂 Capture folder:", runDir);
 	captureLog.info(`Capturing every ${opts.interval}s`);
 	captureLog.info(`Timestamp overlay: ${opts.timestamp ? "on" : "off"}`);
+	captureLog.info(`Snapshot telemetry overlay: ${opts.telemetry && opts.statusUrl ? "on" : "off"}`);
 	captureLog.message('Press "s", then "y" to stop. Any other key cancels.');
 
 	if (opts.statusUrl && opts.waitForPrinting) {

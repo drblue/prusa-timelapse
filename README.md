@@ -32,6 +32,10 @@ node capture-timelapse.mjs
 
 Each run creates a timestamped folder under `snapshots/` with images and `_timelapse_meta.json`.
 
+Snapshots now embed printer telemetry during capture by default when a status endpoint is configured: progress, nozzle/bed temperatures, elapsed/remaining time, and Z position. The overlay uses the same status response saved beside that frame. Failed status requests omit telemetry for that picture rather than reusing older values. The timestamp remains independently configurable.
+
+Use `npm run capture-coreone -- --telemetry false` to keep telemetry for the later `make` step instead. JSON configs accept `"telemetry": false`; env config files accept `TELEMETRY=false`. Embedding requires FFmpeg's `drawtext` filter; unavailable support disables both snapshot overlays with a warning. Embedded text is part of the image and cannot be removed later. Status JSON files are still saved. Run metadata records whether telemetry was embedded, so `npm run make` skips its telemetry pass for these captures and still overlays older captures as before. Video telemetry is described below.
+
 ### Record continuous video
 
 ```bash
