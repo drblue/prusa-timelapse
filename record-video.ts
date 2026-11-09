@@ -19,6 +19,7 @@ export type VideoOptions = VideoOverlayOptions & {
 	captureHeader?: string | null;
 	repairRtsp?: boolean;
 	videoAspect?: string | null;
+	videoResolution?: string;
 	telemetryFile?: string;
 };
 
@@ -28,6 +29,15 @@ export const validateVideoAspect = (ratio: string) => {
 	if (!/^\d+(?::|\/)\d+$/.test(ratio) || ratio.split(/[:/]/).some((v) => !Number.isFinite(Number(v)) || Number(v) <= 0)) {
 		throw new Error("--video-aspect must be a positive ratio such as 16:9");
 	}
+};
+
+export const validateVideoResolution = (resolution: string) => {
+	if (resolution === "source") return;
+	const dimensions = typeof resolution === "string" && resolution.match(/^(\d+)x(\d+)$/);
+	if (!dimensions || dimensions.slice(1).some((value) => {
+		const dimension = Number(value);
+		return !Number.isSafeInteger(dimension) || dimension <= 0 || dimension % 2 !== 0;
+	})) throw new Error("--video-resolution must be source or WIDTHxHEIGHT with positive even dimensions, such as 1280x720");
 };
 
 const videoInputArgs = (opts: VideoOptions) => {
@@ -56,7 +66,12 @@ export const buildVideoArgs = (opts: VideoOptions, outFile: string, filter?: str
 	// MPEG-TS otherwise closes gaps over ten seconds as timestamp discontinuities.
 	if (opts.repairRtsp) args.push("-dts_delta_threshold", "3600");
 	args.push(...videoInputArgs(opts), "-map", "0:v:0", "-an");
-	const filters = [filter];
+	const filters: (string | null | undefined)[] = [];
+	if (opts.videoResolution !== undefined) {
+		validateVideoResolution(opts.videoResolution);
+		if (opts.videoResolution !== "source") filters.push(`scale=${opts.videoResolution.replace("x", ":")}`);
+	}
+	filters.push(filter);
 	if (opts.telemetryFile) filters.push(buildVideoTelemetryFilter(opts.telemetryFile, opts));
 	if (opts.videoAspect) {
 		validateVideoAspect(opts.videoAspect);

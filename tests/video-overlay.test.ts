@@ -5,28 +5,43 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { buildVideoArgs } from "../record-video.ts";
-import { createVideoTelemetryOverlay, videoOverlayTop } from "../video-overlay.ts";
+import { buildVideoTimestampFilter, createVideoTelemetryOverlay, videoOverlayPositions } from "../video-overlay.ts";
 
-test("video includes telemetry below the timestamp in the encoded pictures", () => {
+test("resizes video and renders the clock and telemetry together in each selected corner", () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "prusa-video-overlay-"));
 	try {
 		const special = path.join(root, "path with 'quotes,;[]"); fs.mkdirSync(special);
-		const source = path.join(root, "input.mp4"), output = path.join(root, "video.mkv"), text = path.join(special, "status.txt");
+		const source = path.join(root, "input.mp4"), text = path.join(special, "status.txt");
 		fs.writeFileSync(text, "Progress: 0.0%\nNozzle: 220.0/220.0°C\nBed: 60.0/60.0°C\nElapsed: 0:00  Remaining: 1:00:00\nZ: 0.20mm");
 		const fixture = spawnSync("ffmpeg", ["-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=0x353535:s=1280x720:r=25", "-t", "0.2", source], { encoding: "utf8" });
 		assert.equal(fixture.status, 0, fixture.stderr);
-		const options = { url: source, transport: "tcp", loglevel: "error", telemetryFile: text,
-			font: process.platform === "darwin" ? "/System/Library/Fonts/Supplemental/Arial.ttf" : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-			fontsize: 24, padding: 10, boxOpacity: 0.5, boxBorder: 6, timestamp: true };
-		const timestamp = `drawtext=text='2026-11-08':fontsize=24:fontcolor=white:x=10:y=${videoOverlayTop(options.padding)}`;
-		const result = spawnSync("ffmpeg", buildVideoArgs(options, output, timestamp), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe", "pipe"] });
-		assert.equal(result.status, 0, result.stderr);
-		const pixels = spawnSync("ffmpeg", ["-v", "error", "-i", output, "-vf", "crop=700:270:0:0", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "pipe:1"]);
-		assert.equal(pixels.status, 0, pixels.stderr.toString());
-		const hasText = (start: number, end: number) => pixels.stdout.subarray(start * 700, end * 700).some((pixel) => pixel > 180);
-		assert.ok(!hasText(0, 58), "The top of the video should have room for the title bar");
-		assert.ok(hasText(65, 94), "Timestamp glyphs are missing");
-		assert.ok(hasText(100, 126), "Telemetry glyphs are missing just below the timestamp");
+		for (const position of videoOverlayPositions) {
+			const output = path.join(root, `${position}.mkv`);
+			const options = { url: source, transport: "tcp", loglevel: "error", telemetryFile: text,
+				font: process.platform === "darwin" ? "/System/Library/Fonts/Supplemental/Arial.ttf" : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+				videoResolution: "960x540", videoOverlayPosition: position, timestamp: true };
+			const result = spawnSync("ffmpeg", buildVideoArgs(options, output, buildVideoTimestampFilter(options)), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe", "pipe"] });
+			assert.equal(result.status, 0, result.stderr);
+			const pixels = spawnSync("ffmpeg", ["-v", "error", "-i", output, "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "pipe:1"]);
+			assert.equal(pixels.status, 0, pixels.stderr.toString());
+			assert.equal(pixels.stdout.length, 960 * 540);
+			const bottom = position.startsWith("bottom");
+			const right = position.endsWith("right");
+			const rows = new Set<number>();
+			for (let i = 0; i < pixels.stdout.length; i++) {
+				if (pixels.stdout[i] <= 180) continue;
+				const y = Math.floor(i / 960);
+				assert.equal(i % 960 >= 480, right, position);
+				assert.equal(y >= 270, bottom, position);
+				assert.ok(y >= 43, "The top of the video should have room for the title bar");
+				rows.add(y);
+			}
+			assert.ok(rows.size > 50, "Both the clock and the telemetry should be visible");
+			const clockEdge = bottom ? Math.max(...rows) : Math.min(...rows);
+			const nearClock = [...rows].filter((y) => bottom ? y < clockEdge - 18 : y > clockEdge + 18);
+			const nearestTelemetry = bottom ? Math.max(...nearClock) : Math.min(...nearClock);
+			assert.ok(Math.abs(nearestTelemetry - clockEdge) <= 34, "The telemetry should be close to the clock");
+		}
 	} finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 

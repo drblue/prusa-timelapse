@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { buildSnapshotTelemetryFilters } from "./snapshot-telemetry.ts";
-import { createVideoTelemetryOverlay, videoOverlayTop } from "./video-overlay.ts";
+import { buildVideoTimestampFilter, createVideoTelemetryOverlay, DEFAULT_VIDEO_FONT_SIZE, videoOverlayPositions } from "./video-overlay.ts";
 import { appendVideoStatus } from "./video-telemetry.ts";
 import { formatPrinterStatus } from "./printer-status-format.ts";
 import { captureLog } from "./capture-log.ts";
@@ -11,7 +11,7 @@ import process from "node:process";
 import axios from "axios";
 import dotenv from "dotenv";
 import readline from "node:readline";
-import { recordVideo, validateVideoAspect } from "./record-video.ts";
+import { recordVideo, validateVideoAspect, validateVideoResolution } from "./record-video.ts";
 
 const pad = (n, len = 2) => String(n).padStart(len, "0");
 const padIndex = (n, len = 6) => String(n).padStart(len, "0");
@@ -206,6 +206,9 @@ const applyConfigToOpts = (opts, config) => {
 		setBool("video", data.video);
 		setBool("repairRtsp", data.repairRtsp);
 		setIfDefined("videoAspect", data.videoAspect);
+		setIfDefined("videoResolution", data.videoResolution);
+		setIfDefined("videoFontSize", data.videoFontSize);
+		setIfDefined("videoOverlayPosition", data.videoOverlayPosition);
 		setIfDefined("font", data.font);
 		setNumber("fontsize", data.fontsize);
 		setNumber("padding", data.padding);
@@ -246,6 +249,9 @@ const applyConfigToOpts = (opts, config) => {
 		setBool("video", data.VIDEO);
 		setBool("repairRtsp", data.REPAIR_RTSP);
 		setIfDefined("videoAspect", data.VIDEO_ASPECT);
+		setIfDefined("videoResolution", data.VIDEO_RESOLUTION);
+		setIfDefined("videoFontSize", data.VIDEO_FONT_SIZE);
+		setIfDefined("videoOverlayPosition", data.VIDEO_OVERLAY_POSITION);
 		setIfDefined("font", data.FONT);
 		setNumber("fontsize", data.FONTSIZE);
 		setNumber("padding", data.PADDING);
@@ -286,6 +292,9 @@ const parseArgs = async () => {
 		video: false,
 		repairRtsp: false,
 		videoAspect: null,
+		videoResolution: "source",
+		videoFontSize: undefined,
+		videoOverlayPosition: "top-left",
 		intervalLocked: false,
 		prefix: "frame_",
 		ext: "jpg",
@@ -295,7 +304,7 @@ const parseArgs = async () => {
 		timestamp: true,
 		telemetry: true,
 		font: getDefaultFontPath(),
-		fontsize: 24,
+		fontsize: undefined,
 		padding: 10,
 		boxOpacity: 0.5,
 		boxBorder: 6,
@@ -337,6 +346,9 @@ const parseArgs = async () => {
 		else if (a === "--video") overrides.video = true;
 		else if (a === "--repair-rtsp") overrides.repairRtsp = v !== "false", i++;
 		else if (a === "--video-aspect") overrides.videoAspect = v, i++;
+		else if (a === "--video-resolution") overrides.videoResolution = v, i++;
+		else if (a === "--video-font-size") overrides.videoFontSize = v, i++;
+		else if (a === "--video-overlay-position") overrides.videoOverlayPosition = v, i++;
 		else if (a === "--url") overrides.url = v, i++;
 		else if (a === "--dir") overrides.baseDir = path.resolve(v), i++;
 		else if (a === "--interval") overrides.interval = Number(v), overrides.intervalLocked = true, i++;
@@ -386,6 +398,9 @@ Options:
 	--video       Record MP4; stop on printer completion when status is configured
 	--repair-rtsp true|false (default: false); Buddy3D H.264/TCP packet recovery
 	--video-aspect Display ratio such as 16:9 (default: source ratio)
+	--video-resolution source or WIDTHxHEIGHT such as 1280x720 (default: source)
+	--video-font-size Font size for the video clock and telemetry (default: 18)
+	--video-overlay-position ${videoOverlayPositions.join("|")} (default: top-left)
 	--config      Path(s) to config files (repeat or comma-separated)
 	              (positional config paths are also accepted)
 	--url         Input URL (rtsp://... or http(s)://...) (default: rtsp://192.168.1.186/live)
@@ -402,7 +417,7 @@ Telemetry overlay:
 Timestamp overlay:
 	--timestamp   true|false (default: true)
 	--font        Font file path (default: OS-specific)
-	--fontsize    Number (default: 24)
+	--fontsize    Font size (snapshot default: 24; shared fallback for video)
 
 Noise/robustness:
 	--ignoreDecodeErrors true|false (default: true)
@@ -447,6 +462,18 @@ Controls:
 	}
 	applyConfigToOpts(out, { type: "json", data: overrides });
 	if (out.videoAspect) validateVideoAspect(out.videoAspect);
+	if (out.video) {
+		validateVideoResolution(out.videoResolution);
+		if (!videoOverlayPositions.includes(out.videoOverlayPosition)) {
+			throw new Error(`--video-overlay-position must be one of ${videoOverlayPositions.join(", ")}`);
+		}
+		if (out.videoFontSize !== undefined) {
+			const size = typeof out.videoFontSize === "boolean" ? NaN : parseNumber(out.videoFontSize);
+			if (!Number.isSafeInteger(size) || size <= 0) throw new Error("--video-font-size must be a positive integer");
+			out.fontsize = size;
+		}
+	}
+	out.fontsize ??= out.video ? DEFAULT_VIDEO_FONT_SIZE : 24;
 
 	if (out.statusUrl && (!Number.isFinite(out.statusInterval) || out.statusInterval <= 0)) {
 		throw new Error("--status-interval must be > 0");
@@ -733,16 +760,14 @@ const buildDrawTextFilter = (opts) => {
 	const fontExists = opts.font && fs.existsSync(opts.font);
 	const fontPart = fontExists ? `fontfile=${opts.font}:` : "";
 
-	const stamp = opts.video
-		? "%{localtime}"
-		: escapeForDrawText(formatLocalTimestamp());
+	const stamp = escapeForDrawText(formatLocalTimestamp());
 
 	return {
 		filter:
 			"drawtext=" +
 			fontPart +
 			`text='${stamp}':` +
-			`x=${opts.padding}:y=${opts.video ? videoOverlayTop(opts.padding) : opts.padding}:` +
+			`x=${opts.padding}:y=${opts.padding}:` +
 			`fontsize=${opts.fontsize}:` +
 			"fontcolor=white:" +
 			"box=1:" +
@@ -842,7 +867,7 @@ const run = async () => {
 			doneStates: opts.statusDone.split(","),
 		} : undefined;
 		if (printer) captureLog.path("📊 Printer status log:", path.join(runDir, "recording-status.jsonl"));
-		await recordVideo({ ...opts, telemetryFile: overlay?.file }, runDir, opts.timestamp ? buildDrawTextFilter(opts).filter : null, printer);
+		await recordVideo({ ...opts, telemetryFile: overlay?.file }, runDir, opts.timestamp ? buildVideoTimestampFilter(opts) : null, printer);
 		return;
 	}
 

@@ -76,7 +76,17 @@ While waiting, status polling runs every two seconds, or the configured `--statu
 
 Video mode requires an interactive terminal and a continuous video stream (such as RTSP or HTTP video); a PrusaLink still-image endpoint cannot provide continuous video. Disable snapshot discovery with `--discover-camera false` when using a config that enables it. Timestamp overlays show the current local time. Audio is not recorded. Config files can also enable this mode with `"video": true` (JSON) or `VIDEO=true` (env).
 
-Video embeds printer telemetry below the timestamp by default: progress, nozzle/bed temperatures, elapsed/remaining time, and Z position. Available values refresh on each successful status poll using a text file that FFmpeg reloads without restarting capture. A failed status request clears the telemetry until the next successful response. Disable it with `--telemetry false`, `"telemetry": false` in JSON, or `TELEMETRY=false` in an env config; the timestamp remains independently configurable. FFmpeg must include `drawtext`. Telemetry follows status polling, not each camera frame; held pictures during a camera outage retain their originally embedded text.
+Video embeds printer telemetry next to the timestamp by default: progress, nozzle/bed temperatures, elapsed/remaining time, and Z position. Available values refresh on each successful status poll using a text file that FFmpeg reloads without restarting capture. A failed status request clears the telemetry until the next successful response. Disable it with `--telemetry false`, `"telemetry": false` in JSON, or `TELEMETRY=false` in an env config; the timestamp remains independently configurable. FFmpeg must include `drawtext`. Telemetry follows status polling, not each camera frame; held pictures during a camera outage retain their originally embedded text.
+
+| JSON setting | Env config key | CLI flag | Default |
+| --- | --- | --- | --- |
+| `videoResolution` | `VIDEO_RESOLUTION` | `--video-resolution` | `source` (1280×720 from the HD camera) |
+| `videoFontSize` | `VIDEO_FONT_SIZE` | `--video-font-size` | `18` for both overlays, or the shared `fontsize` if configured |
+| `videoOverlayPosition` | `VIDEO_OVERLAY_POSITION` | `--video-overlay-position` | `top-left` |
+
+Set `videoResolution` to dimensions such as `"1280x720"` or `"960x540"` to resize the saved video. Use positive even dimensions. Resizing occurs in FFmpeg after capture and preserves the display aspect ratio, including any `videoAspect` override. Camera resolution and network traffic are set by the camera.
+
+Choose `top-left`, `bottom-left`, `top-right`, or `bottom-right` for both overlays. Upper corners reserve room for the player's title bar. In lower corners the clock is below the telemetry, so the clock stays in place as telemetry lines change.
 
 ### Capture options
 
@@ -97,7 +107,7 @@ At video finalization, `recording-timeline.json` records the usable video parts,
 
 --timestamp   true|false (default: true)
 --font        Font file path (default: OS-specific)
---fontsize    Number (default: 24)
+--fontsize    Font size (snapshot default: 24; shared fallback for video)
 
 --ignoreDecodeErrors true|false (default: true)
 --loglevel    ffmpeg loglevel (default: fatal)
