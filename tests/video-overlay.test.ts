@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { buildVideoArgs } from "../record-video.ts";
-import { createVideoTelemetryOverlay } from "../video-overlay.ts";
+import { createVideoTelemetryOverlay, videoOverlayTop } from "../video-overlay.ts";
 
 test("video includes telemetry below the timestamp in the encoded pictures", () => {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "prusa-video-overlay-"));
@@ -18,12 +18,15 @@ test("video includes telemetry below the timestamp in the encoded pictures", () 
 		const options = { url: source, transport: "tcp", loglevel: "error", telemetryFile: text,
 			font: process.platform === "darwin" ? "/System/Library/Fonts/Supplemental/Arial.ttf" : "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
 			fontsize: 24, padding: 10, boxOpacity: 0.5, boxBorder: 6, timestamp: true };
-		const timestamp = "drawtext=text='2026-11-08':fontsize=24:fontcolor=white:x=10:y=10";
+		const timestamp = `drawtext=text='2026-11-08':fontsize=24:fontcolor=white:x=10:y=${videoOverlayTop(options.padding)}`;
 		const result = spawnSync("ffmpeg", buildVideoArgs(options, output, timestamp), { encoding: "utf8", stdio: ["ignore", "pipe", "pipe", "pipe"] });
 		assert.equal(result.status, 0, result.stderr);
-		const pixels = spawnSync("ffmpeg", ["-v", "error", "-i", output, "-vf", "crop=700:210:0:50", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "pipe:1"]);
+		const pixels = spawnSync("ffmpeg", ["-v", "error", "-i", output, "-vf", "crop=700:270:0:0", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "pipe:1"]);
 		assert.equal(pixels.status, 0, pixels.stderr.toString());
-		assert.ok(pixels.stdout.some((pixel) => pixel > 180), "Telemetry glyphs are missing below the timestamp");
+		const hasText = (start: number, end: number) => pixels.stdout.subarray(start * 700, end * 700).some((pixel) => pixel > 180);
+		assert.ok(!hasText(0, 58), "The top of the video should have room for the title bar");
+		assert.ok(hasText(65, 94), "Timestamp glyphs are missing");
+		assert.ok(hasText(100, 126), "Telemetry glyphs are missing just below the timestamp");
 	} finally { fs.rmSync(root, { recursive: true, force: true }); }
 });
 
@@ -52,7 +55,7 @@ test("updates telemetry in an already-running encoder and clears failed samples"
 		finally { clearTimeout(deadline); }
 		assert.ok(changed, "Status did not update while FFmpeg was running");
 		const whitePixels = (time: string) => {
-			const decoded = spawnSync("ffmpeg", ["-v", "error", "-ss", time, "-i", output, "-vf", "crop=350:40:0:0", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "pipe:1"]);
+			const decoded = spawnSync("ffmpeg", ["-v", "error", "-ss", time, "-i", output, "-vf", "crop=350:40:0:36", "-frames:v", "1", "-pix_fmt", "gray", "-f", "rawvideo", "pipe:1"]);
 			assert.equal(decoded.status, 0, decoded.stderr.toString());
 			return decoded.stdout.filter((v) => v > 180).length;
 		};

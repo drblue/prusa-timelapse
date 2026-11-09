@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { buildSnapshotTelemetryFilters } from "./snapshot-telemetry.ts";
-import { createVideoTelemetryOverlay } from "./video-overlay.ts";
+import { createVideoTelemetryOverlay, videoOverlayTop } from "./video-overlay.ts";
 import { appendVideoStatus } from "./video-telemetry.ts";
 import { formatPrinterStatus } from "./printer-status-format.ts";
 import { captureLog } from "./capture-log.ts";
@@ -742,7 +742,7 @@ const buildDrawTextFilter = (opts) => {
 			"drawtext=" +
 			fontPart +
 			`text='${stamp}':` +
-			`x=${opts.padding}:y=${opts.padding}:` +
+			`x=${opts.padding}:y=${opts.video ? videoOverlayTop(opts.padding) : opts.padding}:` +
 			`fontsize=${opts.fontsize}:` +
 			"fontcolor=white:" +
 			"box=1:" +

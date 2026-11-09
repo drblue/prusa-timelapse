@@ -11,13 +11,16 @@ export type VideoOverlayOptions = {
 	timestamp?: boolean;
 };
 
+// Leave room for a player title bar, scaled to the height of the video.
+export const videoOverlayTop = (padding = 10) => `h*0.08+${padding}`;
+
 // Escape the AVOption value first, then the surrounding filtergraph syntax.
 const filterValue = (value: string) => value.replace(/['\\:]/g, "\\$&").replace(/['\\,\[\];]/g, "\\$&");
 
 export const buildVideoTelemetryFilter = (file: string, opts: VideoOverlayOptions) => {
 	const font = opts.font && fs.existsSync(opts.font) ? `fontfile=${filterValue(opts.font)}:` : "";
 	const size = opts.fontsize ?? 24, padding = opts.padding ?? 10, border = opts.boxBorder ?? 6;
-	const top = opts.timestamp ? padding + size + border * 2 + 4 : padding;
+	const top = videoOverlayTop(padding) + (opts.timestamp ? `+${size + border * 2 - Math.min(2, border)}` : "");
 	return `drawtext=${font}textfile=${filterValue(path.resolve(file))}:reload=1:expansion=none:fontsize=${size}:line_spacing=4:fontcolor=white:x=${padding}:y=${top}:box=1:boxcolor=black@${opts.boxOpacity ?? 0.5}:boxborderw=${border}`;
 };
 
