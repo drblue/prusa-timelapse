@@ -141,7 +141,12 @@ export const captureVideo = async (
 	let attempt = 0;
 	let failure: unknown;
 	let stoppedAt: number | undefined;
-	const markStopped = () => { stoppedAt ??= Date.now(); };
+	const markStopped = () => {
+		if (stoppedAt !== undefined) return;
+		stoppedAt = Date.now();
+		const reason = typeof signal.reason === "string" ? signal.reason : "Stopped by user";
+		log(`${reason}.`);
+	};
 	signal.addEventListener("abort", markStopped, { once: true });
 	if (signal.aborted) markStopped();
 	try {
@@ -189,7 +194,7 @@ export const captureVideo = async (
 						if (!decoderClosed) child.kill("SIGKILL");
 					}, 3000);
 				};
-				const onAbort = () => finish("Stopped by user");
+				const onAbort = () => finish("Capture stopped");
 				signal.addEventListener("abort", onAbort, { once: true });
 				if (signal.aborted) onAbort();
 				const watchdog = setInterval(() => {
@@ -291,17 +296,21 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 	const controller = new AbortController();
 	const wasRaw = process.stdin.isRaw;
 	let confirming = false;
-	const stop = () => {
+	let capturing = false;
+	let finishTimer: ReturnType<typeof setTimeout> | undefined;
+	const stop = (reason: string) => {
 		if (controller.signal.aborted) return;
+		clearTimeout(finishTimer);
 		captureLog.info("\nStopping video capture...");
-		controller.abort();
+		controller.abort(reason);
 	};
+	const stopByUser = () => stop("Stopped by user");
 	const onKeypress = (key: string, details: readline.Key) => {
 		if (controller.signal.aborted) return;
-		if (details?.ctrl && details.name === "c") return stop();
+		if (details?.ctrl && details.name === "c") return stopByUser();
 		if (confirming) {
 			confirming = false;
-			if (key?.toLowerCase() === "y") stop();
+			if (key?.toLowerCase() === "y") stopByUser();
 			else captureLog.message("\nContinuing recording.");
 		} else if (key?.toLowerCase() === "s") {
 			confirming = true;
@@ -312,8 +321,8 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 	process.stdin.setRawMode(true);
 	process.stdin.on("keypress", onKeypress);
 	process.stdin.resume();
-	process.on("SIGINT", stop);
-	process.on("SIGTERM", stop);
+	process.on("SIGINT", stopByUser);
+	process.on("SIGTERM", stopByUser);
 	captureLog.path("📂 Capture folder:", runDir);
 	captureLog.path("🎬 Video will be saved to:", path.join(runDir, "recording.mp4"));
 	if (opts.repairRtsp) captureLog.info("Buddy3D TCP packet recovery enabled; using one camera connection.");
@@ -325,7 +334,14 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 			const ready = new Promise<boolean>((resolve) => {
 				monitoring = watchPrinterLifecycle(printer, controller.signal, resolve, (state) => {
 					captureLog.info(`${formatVideoTimestamp()} Printer status "${state}" detected. Finishing video...`);
-					stop();
+					const status = state.trim().toUpperCase();
+					const reason = `Stopped automatically: printer reported ${status}`;
+					if (capturing && opts.telemetryFile && status === "FINISHED") {
+						// Let the encoder draw the final telemetry on incoming pictures before closing the stream.
+						finishTimer = setTimeout(() => stop(reason), 1000);
+					} else {
+						stop(reason);
+					}
 				}, (state, job) => {
 					captureLog.message(formatPrinterStatus(state, job));
 				}, (error) => {
@@ -334,17 +350,19 @@ export const recordVideo = async (opts: VideoOptions, runDir: string, filter?: s
 			});
 			if (await ready && !controller.signal.aborted) {
 				captureLog.info("Print start estimated from printer telemetry; starting video capture...");
+				capturing = true;
 				await captureVideo(opts, runDir, filter, controller.signal);
 			}
 		}
 	} finally {
+		clearTimeout(finishTimer);
 		controller.abort();
 		await monitoring;
 		process.stdin.removeListener("keypress", onKeypress);
 		process.stdin.setRawMode(Boolean(wasRaw));
 		process.stdin.pause();
-		process.removeListener("SIGINT", stop);
-		process.removeListener("SIGTERM", stop);
+		process.removeListener("SIGINT", stopByUser);
+		process.removeListener("SIGTERM", stopByUser);
 		captureLog.path("📂 Capture folder:", runDir);
 	}
 };
